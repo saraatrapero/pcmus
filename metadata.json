@@ -1,0 +1,6 @@
+{
+  "name": "PC Mus",
+  "description": "Simulador clásico del juego del mus español inspirado en el mítico PC Mus de 1996, con personajes cómicos de los 90, torneo, señas, apuestas y reglas completas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
