@@ -166,62 +166,87 @@ export function comparePunto(sumA: number, sumB: number): number {
   return 0;
 }
 
-// Available señas in Spanish Mus
+// Available señas according to Reglamento Oficial de Mus de Bizkaia y Torneo de Txapeldunes (Artículo II)
 export const SEÑAS: Seña[] = [
   {
     id: 'dos_reyes',
-    name: 'Levantar cejas',
-    gesture: '🤨 (Levanta ambas cejas)',
-    meaning: '2 Reyes o Treses',
+    name: 'Dos reyes: Morder labio inferior',
+    gesture: '😬 (Muerde el labio inferior)',
+    meaning: '2 Reyes (o Treses). Sin señas parciales de duples.',
     ruleCheck: (cards) => {
       const kings = cards.filter((c) => getMusRank(c.number) === 12);
-      return kings.length === 2;
+      // No señas parciales si son duples
+      return kings.length === 2 && evaluatePares(cards).type === 'par';
     },
   },
   {
     id: 'dos_ases',
-    name: 'Morderse el labio',
-    gesture: '😬 (Se muerde el labio inferior)',
-    meaning: '2 Ases o Doses',
+    name: 'Dos ases: Sacar punta de lengua',
+    gesture: '👅 (Saca la punta de la lengua hacia delante)',
+    meaning: '2 Ases (o Doses). Sin señas parciales de duples.',
     ruleCheck: (cards) => {
       const aces = cards.filter((c) => getMusRank(c.number) === 1);
-      return aces.length === 2;
+      return aces.length === 2 && evaluatePares(cards).type === 'par';
+    },
+  },
+  {
+    id: 'medias_ases',
+    name: 'Medias de ases: Lengua a un lado',
+    gesture: '👅 (Saca la punta de la lengua hacia un lado)',
+    meaning: 'Medias de Ases (3 Ases o Doses)',
+    ruleCheck: (cards) => {
+      const aces = cards.filter((c) => getMusRank(c.number) === 1);
+      return aces.length === 3;
+    },
+  },
+  {
+    id: 'medias_reyes',
+    name: 'Medias de reyes: Comisura a un lado',
+    gesture: '😏 (Mueve la comisura de los labios a un lado con Reyes)',
+    meaning: 'Medias de Reyes (3 Reyes o Treses)',
+    ruleCheck: (cards) => {
+      const kings = cards.filter((c) => getMusRank(c.number) === 12);
+      return kings.length === 3;
     },
   },
   {
     id: 'medias',
-    name: 'Torcer la boca',
-    gesture: '😏 (Tuerce la boca a un lado)',
-    meaning: 'Medias (Trío)',
+    name: 'Medias: Comisura a un lado',
+    gesture: '😏 (Mueve la comisura de los labios a un lado)',
+    meaning: 'Medias de cualquier carta (trío)',
     ruleCheck: (cards) => evaluatePares(cards).type === 'medias',
   },
   {
     id: 'duples',
-    name: 'Sacar la lengua de lado',
-    gesture: '👅 (Muestra la punta de la lengua)',
+    name: 'Duples: Levantar las cejas',
+    gesture: '🤨 (Levanta ambas cejas)',
     meaning: 'Duples (Dobles parejas o póker)',
     ruleCheck: (cards) => evaluatePares(cards).type === 'duples',
   },
   {
     id: 'treinta_y_uno',
-    name: 'Guiñar un ojo',
-    gesture: '😉 (Guiña un ojo con disimulo)',
-    meaning: '31 de Juego (La mejor jugada)',
+    name: 'Treinta y una (31): Guiñar un ojo',
+    gesture: '😉 (Guiña un ojo)',
+    meaning: 'Juego de 31 (Treinta y una - La mejor jugada)',
     ruleCheck: (cards) => getHandSum(cards) === 31,
   },
   {
     id: 'punto_treinta',
-    name: 'Mover el hombro',
-    gesture: '🤷‍♂️ (Encoge ligeramente el hombro)',
-    meaning: '30 de Punto',
+    name: 'Treinta al no juego: Guiñar un ojo',
+    gesture: '😉 (Guiña un ojo tras «juego no»)',
+    meaning: 'Treinta al juego / 30 de Punto',
     ruleCheck: (cards) => getHandSum(cards) === 30,
   },
   {
     id: 'ciego',
-    name: 'Cerrar los ojos',
-    gesture: '😑 (Cierra los ojos un segundo)',
-    meaning: 'Ciego (Sin pares y sin juego)',
-    ruleCheck: (cards) => evaluatePares(cards).type === 'none' && getHandSum(cards) < 31,
+    name: 'Ciego: Cerrar los dos ojos',
+    gesture: '😑 (Cierra los dos ojos)',
+    meaning: 'Ciego (Sin pares y sin juego - No válida con 29)',
+    ruleCheck: (cards) =>
+      evaluatePares(cards).type === 'none' &&
+      getHandSum(cards) < 31 &&
+      getHandSum(cards) !== 30 &&
+      getHandSum(cards) !== 29,
   },
 ];
 

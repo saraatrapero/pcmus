@@ -33,9 +33,9 @@ export const Controls: React.FC<ControlsProps> = ({
     phase === 'punto_bet';
 
   return (
-    <div className="bg-stone-950/95 border-4 border-amber-600 rounded-2xl p-3 sm:p-4 shadow-[6px_6px_0px_#000] text-stone-100 max-w-2xl mx-auto backdrop-blur-md">
+    <div className="bg-stone-950/95 border-3 border-amber-600 rounded-2xl p-2 sm:p-2.5 shadow-[4px_4px_0px_#000] text-stone-100 max-w-2xl mx-auto backdrop-blur-md my-1">
       {/* Turn indicator / status header */}
-      <div className="flex items-center justify-between border-b-2 border-stone-800 pb-2 mb-3">
+      <div className="flex items-center justify-between border-b border-stone-800 pb-1.5 mb-2">
         <div className="flex items-center gap-2">
           <span
             className={`w-3 h-3 rounded-full border border-black animate-pulse ${
@@ -94,23 +94,32 @@ export const Controls: React.FC<ControlsProps> = ({
         </div>
       )}
 
-      {/* Discard Phase */}
+      {/* Discard Phase (Art. IV, Punto 2: mínimo 1 descarte obligatorio) */}
       {isPlayerTurn && isDiscarding && (
         <div className="flex flex-col sm:flex-row items-center gap-3">
           <div className="text-xs font-mono font-bold text-amber-200 flex-1 text-center sm:text-left">
-            Haz clic sobre las cartas de tu mano que quieras cambiar ({selectedCardCount} seleccionadas).
+            Selecciona las cartas a cambiar ({selectedCardCount} elegidas).{' '}
+            <span className="text-amber-400 font-serif italic block sm:inline">
+              (Reglamento Bizkaia: Mínimo 1 descarte obligatorio)
+            </span>
           </div>
           <button
+            disabled={selectedCardCount === 0}
             onClick={() => {
+              if (selectedCardCount === 0) return;
               sound.playCard();
               onAction('discard');
             }}
-            className="w-full sm:w-auto py-2.5 px-6 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 font-mono font-black text-sm tracking-wide shadow-[3px_3px_0px_#000] transition active:translate-x-0.5 active:translate-y-0.5 border-2 border-black flex items-center justify-center gap-2"
+            className={`w-full sm:w-auto py-2.5 px-6 rounded-xl font-mono font-black text-sm tracking-wide shadow-[3px_3px_0px_#000] transition border-2 border-black flex items-center justify-center gap-2 ${
+              selectedCardCount > 0
+                ? 'bg-amber-400 hover:bg-amber-300 text-stone-950 cursor-pointer active:translate-x-0.5 active:translate-y-0.5'
+                : 'bg-stone-800 text-stone-500 border-stone-700 cursor-not-allowed opacity-75'
+            }`}
           >
             <span>🔀</span>
             <span>
               {selectedCardCount === 0
-                ? 'No cambiar ninguna'
+                ? 'Elige al menos 1 carta'
                 : `Descartar ${selectedCardCount} carta${selectedCardCount > 1 ? 's' : ''}`}
             </span>
           </button>

@@ -36,17 +36,31 @@ import { RetroDosOverlay } from './components/RetroDosOverlay';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { InteractiveTutorial } from './components/InteractiveTutorial';
 import { MultiplayerChatModal } from './components/MultiplayerChatModal';
+import { UserControlModal } from './components/UserControlModal';
+import { userProfileEngine, UserProfile } from './userProfileEngine';
 import { multiplayerService } from './multiplayer/multiplayerService';
 import { MultiplayerRoom } from './types';
+import { getMusRank } from './musLogic';
+import { RecuentoOverlay } from './components/RecuentoOverlay';
+import { computeHandRecountPlan, HandRecountPlan } from './recuentoCalculator';
 
 export default function App() {
   // Screen views: 'select' | 'bracket' | 'game' | 'multiplayer' | 'tutorial'
   const [view, setView] = useState<'select' | 'bracket' | 'game' | 'multiplayer' | 'tutorial'>('select');
   const [gameMode, setGameMode] = useState<GameMode>('torneo');
   const [targetPiedras, setTargetPiedras] = useState<number>(40);
-  const [crtEnabled, setCrtEnabled] = useState<boolean>(true);
+  const [crtEnabled, setCrtEnabled] = useState<boolean>(false);
   const [rulesOpen, setRulesOpen] = useState<boolean>(false);
   const [señasOpen, setSeñasOpen] = useState<boolean>(false);
+  const [userControlOpen, setUserControlOpen] = useState<boolean>(false);
+  const [activeUser, setActiveUser] = useState<UserProfile>(userProfileEngine.getActiveUser());
+
+  useEffect(() => {
+    const unsub = userProfileEngine.subscribe(() => {
+      setActiveUser(userProfileEngine.getActiveUser());
+    });
+    return () => unsub();
+  }, []);
 
   // Multiplayer state
   const [multiplayerRoom, setMultiplayerRoom] = useState<MultiplayerRoom | null>(null);
@@ -75,6 +89,50 @@ export default function App() {
   const [recentEvent, setRecentEvent] = useState<string | null>('Repartiendo naipes...');
   const [cameo, setCameo] = useState<Cameo | null>(null);
   const [activeCameoType, setActiveCameoType] = useState<string>('ordago');
+  const [gameSpeed, setGameSpeed] = useState<'tranquilo' | 'normal' | 'rapido'>('tranquilo');
+  const [recountPlan, setRecountPlan] = useState<HandRecountPlan | null>(null);
+  const isScoringRef = React.useRef<boolean>(false);
+  const handWonRef = React.useRef<boolean>(false);
+  const isTransitioningRef = React.useRef<boolean>(false);
+  const pendingTimersRef = React.useRef<number[]>([]);
+
+  const clearAllPendingTimers = () => {
+    pendingTimersRef.current.forEach((t) => clearTimeout(t));
+    pendingTimersRef.current = [];
+  };
+
+  const safeTimeout = (fn: () => void, ms: number) => {
+    const timer = window.setTimeout(() => {
+      fn();
+    }, ms);
+    pendingTimersRef.current.push(timer);
+    return timer;
+  };
+
+  const getDelays = () => {
+    if (gameSpeed === 'tranquilo') {
+      return {
+        aiTurn: 2000,
+        speechHold: 1800,
+        transition: 2200,
+        allMusPass: 1600,
+      };
+    }
+    if (gameSpeed === 'normal') {
+      return {
+        aiTurn: 1300,
+        speechHold: 1200,
+        transition: 1400,
+        allMusPass: 1200,
+      };
+    }
+    return {
+      aiTurn: 750,
+      speechHold: 700,
+      transition: 850,
+      allMusPass: 750,
+    };
+  };
 
   // Bet State for the active lance
   const [lanceBets, setLanceBets] = useState<Record<string, LanceBetState>>({
@@ -142,7 +200,7 @@ export default function App() {
     const newPlayers: Player[] = [
       {
         id: playerChar.id,
-        name: playerChar.name,
+        name: activeUser?.name || playerChar.name,
         realName: playerChar.realName,
         quote: playerChar.presentation,
         team: 0,
@@ -301,6 +359,11 @@ export default function App() {
     setCurrentTurn(mano);
     setPhase('mus_dialog');
     setRecentEvent(`Mano: ${dealtPlayers[mano].name}. Se inicia consulta de Mus.`);
+    isScoringRef.current = false;
+    handWonRef.current = false;
+    isTransitioningRef.current = false;
+    setRecountPlan(null);
+    clearAllPendingTimers();
 
     // Reset lance bets
     setLanceBets({
@@ -312,22 +375,38 @@ export default function App() {
     });
   };
 
-  // AI Turn automation ticker
+  // AI Turn automation ticker (guarded against duplicate ticks and race loops)
   useEffect(() => {
     if (view !== 'game' || players.length === 0) return;
+    if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
+
+    // Only run during active turn-based phases (never during scoring, round_end, or discarding)
+    const isTurnPhase = [
+      'mus_dialog',
+      'grande',
+      'chica',
+      'pares_bet',
+      'juego_bet',
+      'punto_bet',
+    ].includes(phase);
+
+    if (!isTurnPhase) return;
 
     // Is it an AI turn?
-    if (currentTurn !== 0) {
-      const timer = setTimeout(() => {
+    if (currentTurn !== 0 && currentTurn >= 0) {
+      const delays = getDelays();
+      const timer = window.setTimeout(() => {
+        if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
         handleAITurn();
-      }, 1100);
+      }, delays.aiTurn);
       return () => clearTimeout(timer);
     }
-  }, [currentTurn, phase, view, players]);
+  }, [currentTurn, phase, view, gameSpeed]);
 
   // Execute AI action based on phase
   const handleAITurn = () => {
     if (players.length === 0) return;
+    if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
     const aiPlayer = players[currentTurn];
     if (!aiPlayer) return;
 
@@ -349,15 +428,21 @@ export default function App() {
         sound.playEnvido();
         setRecentEvent(`¡${aiPlayer.name} corta el mus! No hay mus.`);
         voiceEngine.speakCharacter(aiPlayer.id, speech);
-        // Mus cut! Advance to Grande betting
-        setTimeout(() => {
+        // Mus cut! Advance to Grande betting with safe transition
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
           startLance('grande');
-        }, 1200);
+        }, delays.transition);
       }
       return;
     }
 
     // Betting phase (grande, chica, pares_bet, juego_bet, punto_bet)
+    const isBettingLance = ['grande', 'chica', 'pares_bet', 'juego_bet', 'punto_bet'].includes(phase);
+    if (!isBettingLance) return;
+
     const lanceKey =
       phase === 'grande'
         ? 'grande'
@@ -393,10 +478,13 @@ export default function App() {
     // If completed full circle back to manoIndex, everyone said Mus!
     if (nextSeat === manoIndex) {
       setRecentEvent('¡Los cuatro jugadores quieren Mus! Se procede a los descartes.');
-      setTimeout(() => {
+      isTransitioningRef.current = true;
+      const delays = getDelays();
+      safeTimeout(() => {
+        isTransitioningRef.current = false;
         setPhase('discarding');
         setCurrentTurn(0); // Give user turn to select discards
-      }, 1000);
+      }, delays.allMusPass);
     } else {
       setCurrentTurn(nextSeat);
     }
@@ -447,17 +535,32 @@ export default function App() {
 
       if (!t0Has && !t1Has) {
         setRecentEvent('Nadie tiene Pares. Se pasa al siguiente lance.');
-        setTimeout(() => startLance('juego'), 1200);
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
+          startLance('juego');
+        }, delays.transition);
         return;
       }
       if (t0Has && !t1Has) {
         setRecentEvent('Solo el Equipo Jugador tiene Pares (se cobrarán en el recuento).');
-        setTimeout(() => startLance('juego'), 1200);
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
+          startLance('juego');
+        }, delays.transition);
         return;
       }
       if (!t0Has && t1Has) {
         setRecentEvent('Solo los Rivales tienen Pares (se cobrarán en el recuento).');
-        setTimeout(() => startLance('juego'), 1200);
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
+          startLance('juego');
+        }, delays.transition);
         return;
       }
 
@@ -473,19 +576,29 @@ export default function App() {
       const t1Has = getHandSum(players[1].cards) >= 31 || getHandSum(players[3].cards) >= 31;
 
       if (!t0Has && !t1Has) {
-        setRecentEvent('Nadie tiene Juego (&gt;= 31). ¡Se juega al PUNTO!');
+        setRecentEvent('Nadie tiene Juego (>= 31). ¡Se juega al PUNTO!');
         setPhase('punto_bet');
         setCurrentTurn(manoIndex);
         return;
       }
       if (t0Has && !t1Has) {
         setRecentEvent('Solo el Equipo Jugador tiene Juego (se cobrará en el recuento).');
-        setTimeout(() => resolveHand(), 1200);
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
+          resolveHand();
+        }, delays.transition);
         return;
       }
       if (!t0Has && t1Has) {
         setRecentEvent('Solo los Rivales tienen Juego (se cobrarán en el recuento).');
-        setTimeout(() => resolveHand(), 1200);
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
+          resolveHand();
+        }, delays.transition);
         return;
       }
 
@@ -583,8 +696,10 @@ export default function App() {
       if (currentBet.isOrdago) {
         setRecentEvent(`¡${actingPlayer.name} DICE QUIERO AL ÓRDAGO! ¡¡A VER LAS CARTAS!!`);
         setShowAllCards(true);
+        isTransitioningRef.current = true;
 
-        setTimeout(() => {
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
           // Instant resolution of Órdago on this lance!
           const result = getWinningTeamForLance(lanceKey as any, players, manoIndex);
           setRecentEvent(`¡El lance de ${lanceKey.toUpperCase()} lo gana ${players[result.winningPlayerIndex].name}!`);
@@ -594,7 +709,7 @@ export default function App() {
           } else {
             triggerDefeat('¡LOS RIVALES GANAN EL JUEGO POR ÓRDAGO!');
           }
-        }, 1800);
+        }, 2200);
         return;
       }
 
@@ -610,9 +725,12 @@ export default function App() {
       }));
 
       // Move to next lance
-      setTimeout(() => {
+      isTransitioningRef.current = true;
+      const delays = getDelays();
+      safeTimeout(() => {
+        isTransitioningRef.current = false;
         advanceToNextLance(lanceKey);
-      }, 1200);
+      }, delays.transition);
       return;
     }
 
@@ -633,9 +751,12 @@ export default function App() {
         },
       }));
 
-      setTimeout(() => {
+      isTransitioningRef.current = true;
+      const delays = getDelays();
+      safeTimeout(() => {
+        isTransitioningRef.current = false;
         advanceToNextLance(lanceKey);
-      }, 1200);
+      }, delays.transition);
       return;
     }
 
@@ -646,9 +767,12 @@ export default function App() {
       // If everyone passed full cycle
       if (nextSeat === manoIndex) {
         setRecentEvent(`Lance de ${lanceKey.toUpperCase()} pasa en silencio (en blanco).`);
-        setTimeout(() => {
+        isTransitioningRef.current = true;
+        const delays = getDelays();
+        safeTimeout(() => {
+          isTransitioningRef.current = false;
           advanceToNextLance(lanceKey);
-        }, 1000);
+        }, delays.transition);
       } else {
         setCurrentTurn(nextSeat);
       }
@@ -671,13 +795,16 @@ export default function App() {
 
   // Add stones to a team
   const awardPiedras = (team: 0 | 1, count: number, reason: string) => {
+    if (handWonRef.current || count <= 0) return;
     sound.playChip();
     setRecentEvent(`+${count} piedras para ${team === 0 ? 'Equipo Jugador' : 'Rivales'} (${reason}).`);
 
     if (team === 0) {
       setScoreTeam0((prev) => {
+        if (prev.piedras >= targetPiedras || handWonRef.current) return prev;
         const newP = prev.piedras + count;
         if (newP >= targetPiedras) {
+          handWonRef.current = true;
           triggerWin('¡Equipo Jugador ha alcanzado la meta de piedras!');
           return { piedras: targetPiedras, juegosWon: prev.juegosWon + 1 };
         }
@@ -685,8 +812,10 @@ export default function App() {
       });
     } else {
       setScoreTeam1((prev) => {
+        if (prev.piedras >= targetPiedras || handWonRef.current) return prev;
         const newP = prev.piedras + count;
         if (newP >= targetPiedras) {
+          handWonRef.current = true;
           triggerDefeat('¡Los Rivales han alcanzado la meta de piedras!');
           return { piedras: targetPiedras, juegosWon: prev.juegosWon + 1 };
         }
@@ -697,84 +826,42 @@ export default function App() {
 
   // Showdown & Recuento de Tantos (Final Scoring)
   const resolveHand = () => {
+    if (isScoringRef.current) return;
+    isScoringRef.current = true;
+    isTransitioningRef.current = true;
+
     setPhase('scoring');
     setShowAllCards(true);
-    setRecentEvent('¡A ver las cartas! Se procede al recuento tradicional de tantos.');
+    setRecentEvent('¡A ver las cartas! Se procede al recuento tradicional de tantos paso a paso.');
 
-    setTimeout(() => {
-      // 1. Resolve GRANDE
-      const resGrande = getWinningTeamForLance('grande', players, manoIndex);
-      const betGrande = lanceBets.grande;
-      if (!betGrande.rejected) {
-        const pts = betGrande.accepted ? betGrande.currentBet : 1;
-        awardPiedras(resGrande.winningTeam, pts, `Ganador Grande: ${players[resGrande.winningPlayerIndex].name}`);
-      }
+    const plan = computeHandRecountPlan(players, manoIndex, lanceBets);
+    setRecountPlan(plan);
+  };
 
-      // 2. Resolve CHICA
-      setTimeout(() => {
-        const resChica = getWinningTeamForLance('chica', players, manoIndex);
-        const betChica = lanceBets.chica;
-        if (!betChica.rejected) {
-          const pts = betChica.accepted ? betChica.currentBet : 1;
-          awardPiedras(resChica.winningTeam, pts, `Ganador Chica: ${players[resChica.winningPlayerIndex].name}`);
-        }
+  const handleLancePointsAwarded = (team: 0 | 1, pts: number, reason: string) => {
+    awardPiedras(team, pts, reason);
+  };
 
-        // 3. Resolve PARES
-        setTimeout(() => {
-          const eval0 = evaluatePares(players[0].cards);
-          const eval1 = evaluatePares(players[1].cards);
-          const eval2 = evaluatePares(players[2].cards);
-          const eval3 = evaluatePares(players[3].cards);
-          const hasParesTeam0 = eval0.level > 0 || eval2.level > 0;
-          const hasParesTeam1 = eval1.level > 0 || eval3.level > 0;
-
-          if (hasParesTeam0 || hasParesTeam1) {
-            const resPares = getWinningTeamForLance('pares', players, manoIndex);
-            const betPares = lanceBets.pares;
-            // Pair bonuses: 1 for par, 2 for medias, 3 for duples
-            const bestPlayerCards = players[resPares.winningPlayerIndex].cards;
-            const pEval = evaluatePares(bestPlayerCards);
-            const baseBonus = pEval.level; // 1, 2 or 3
-            const pts = betPares.accepted ? betPares.currentBet + baseBonus : baseBonus;
-            awardPiedras(resPares.winningTeam, pts, `Pares (${pEval.type.toUpperCase()})`);
-          }
-
-          // 4. Resolve JUEGO or PUNTO
-          setTimeout(() => {
-            const hasJuegoAny = players.some((p) => getHandSum(p.cards) >= 31);
-            if (hasJuegoAny) {
-              const resJuego = getWinningTeamForLance('juego', players, manoIndex);
-              const betJuego = lanceBets.juego;
-              const bestSum = getHandSum(players[resJuego.winningPlayerIndex].cards);
-              const baseBonus = bestSum === 31 ? 3 : 2; // 3 piedras for 31, 2 for other juegos
-              const pts = betJuego.accepted ? betJuego.currentBet + baseBonus : baseBonus;
-              awardPiedras(resJuego.winningTeam, pts, `Juego (${bestSum})`);
-            } else {
-              const resPunto = getWinningTeamForLance('punto', players, manoIndex);
-              const betPunto = lanceBets.punto;
-              const pts = betPunto.accepted ? betPunto.currentBet + 1 : 1;
-              awardPiedras(resPunto.winningTeam, pts, 'Punto');
-            }
-
-            // Finish hand, rotate mano
-            setTimeout(() => {
-              setPhase('round_end');
-              setRecentEvent('Mano finalizada. Preparaos para la siguiente mano.');
-            }, 1800);
-          }, 1200);
-        }, 1200);
-      }, 1200);
-    }, 1500);
+  const handleFinishRecount = () => {
+    if (handWonRef.current) return;
+    setRecountPlan(null);
+    setPhase('round_end');
+    setRecentEvent('Mano finalizada. Preparaos para la siguiente mano.');
   };
 
   // Next Hand trigger
   const handleNextHand = () => {
+    clearAllPendingTimers();
+    setRecountPlan(null);
+    isScoringRef.current = false;
+    isTransitioningRef.current = false;
     const nextMano = (manoIndex + 1) % 4;
     dealNewHand(players, nextMano);
   };
 
   // Trigger win of game / match / tournament
   const triggerWin = (reason: string) => {
+    handWonRef.current = true;
     sound.playVictory();
     triggerCameo('win');
     const winQuote = getCharacterLine(players[0]?.id || 'tio_gil', 'win');
@@ -803,6 +890,7 @@ export default function App() {
 
   // Trigger loss
   const triggerDefeat = (reason: string) => {
+    handWonRef.current = true;
     const loseQuote = getCharacterLine(players[0]?.id || 'tio_gil', 'lose');
     if (players[0] && loseQuote) {
       voiceEngine.speakCharacter(players[0].id, loseQuote);
@@ -864,6 +952,7 @@ export default function App() {
   const handleUserAction = (action: string) => {
     const user = players[0];
     if (action === 'mus') {
+      userProfileEngine.recordAction('mus');
       sound.playCard();
       const speech = getCharacterLine(user?.id || 'tio_gil', 'mus') || '¡Mus!';
       setPlayers((prev) =>
@@ -873,6 +962,7 @@ export default function App() {
       setRecentEvent('Has pedido Mus.');
       advanceMusTurn(0);
     } else if (action === 'no_mus') {
+      userProfileEngine.recordAction('no_mus');
       sound.playEnvido();
       const speech = getCharacterLine(user?.id || 'tio_gil', 'noMus') || '¡No hay mus!';
       setPlayers((prev) =>
@@ -880,9 +970,12 @@ export default function App() {
       );
       if (user) voiceEngine.speakCharacter(user.id, speech);
       setRecentEvent('¡Cortas el mus! No hay mus.');
-      setTimeout(() => {
+      isTransitioningRef.current = true;
+      const delays = getDelays();
+      safeTimeout(() => {
+        isTransitioningRef.current = false;
         startLance('grande');
-      }, 1000);
+      }, delays.transition);
     } else if (action === 'discard') {
       handleUserDiscard();
     } else {
@@ -897,6 +990,33 @@ export default function App() {
           : phase === 'juego_bet'
           ? 'juego'
           : 'punto';
+
+      // Evaluate player's hand strength to teach the AI if the user bluffs or bets for value
+      let handStrength = 5.0;
+      if (user && user.cards && user.cards.length === 4) {
+        if (lanceKey === 'grande') {
+          const kings = user.cards.filter((c) => getMusRank(c.number) === 12).length;
+          handStrength = kings * 2.5;
+        } else if (lanceKey === 'chica') {
+          const aces = user.cards.filter((c) => getMusRank(c.number) === 1).length;
+          handStrength = aces * 2.5;
+        } else if (lanceKey === 'pares') {
+          const p = evaluatePares(user.cards);
+          handStrength = p.type === 'duples' ? 8.5 : p.type === 'medias' ? 6.5 : p.type === 'par' ? 3.5 : 0;
+        } else if (lanceKey === 'juego') {
+          const sum = getHandSum(user.cards);
+          handStrength = sum === 31 ? 10 : sum === 32 ? 8.5 : sum >= 33 ? 5 : 0;
+        } else if (lanceKey === 'punto') {
+          const sum = getHandSum(user.cards);
+          handStrength = sum === 30 ? 9 : sum >= 27 ? 6 : 3;
+        }
+      }
+      userProfileEngine.recordAction(
+        action as any,
+        lanceKey,
+        handStrength,
+        currentBetState.isOrdago
+      );
 
       let speech = 'Paso.';
       if (action === 'envido') speech = getCharacterLine(user?.id || 'tio_gil', 'envido') || '¡Envido dos piedras!';
@@ -940,7 +1060,14 @@ export default function App() {
         onExitGame={() => setView('select')}
         onOpenMultiplayer={() => setView('multiplayer')}
         onOpenTutorial={() => setView('tutorial')}
+        onOpenUserControl={() => setUserControlOpen(true)}
         gameMode={gameMode}
+        gameSpeed={gameSpeed}
+        onChangeGameSpeed={() =>
+          setGameSpeed((prev) =>
+            prev === 'tranquilo' ? 'normal' : prev === 'normal' ? 'rapido' : 'tranquilo'
+          )
+        }
       />
 
       {/* Cameo guest pop-up banner */}
@@ -952,6 +1079,7 @@ export default function App() {
           onStartGame={handleStartGame}
           onOpenMultiplayer={() => setView('multiplayer')}
           onOpenTutorial={() => setView('tutorial')}
+          onOpenUserControl={() => setUserControlOpen(true)}
         />
       )}
 
@@ -1053,7 +1181,29 @@ export default function App() {
             scoreTeam0={scoreTeam0}
             scoreTeam1={scoreTeam1}
             targetPiedras={targetPiedras}
+            onOpenUserControl={() => setUserControlOpen(true)}
+            activeUser={activeUser}
+            gameSpeed={gameSpeed}
+            onChangeGameSpeed={() =>
+              setGameSpeed((prev) =>
+                prev === 'tranquilo' ? 'normal' : prev === 'normal' ? 'rapido' : 'tranquilo'
+              )
+            }
           />
+
+          {/* Recuento Tradicional de Tantos (Paso a paso, animado y pausado) */}
+          {phase === 'scoring' && recountPlan && (
+            <RecuentoOverlay
+              recountPlan={recountPlan}
+              players={players}
+              scoreTeam0={scoreTeam0}
+              scoreTeam1={scoreTeam1}
+              targetPiedras={targetPiedras}
+              gameSpeed={gameSpeed}
+              onLancePointsAwarded={handleLancePointsAwarded}
+              onFinishRecount={handleFinishRecount}
+            />
+          )}
 
           {/* Player controls & status bar */}
           {phase !== 'round_end' && phase !== 'game_over' ? (
@@ -1113,6 +1263,13 @@ export default function App() {
 
       {/* Rules & History Modal */}
       <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
+
+      {/* User Control & AI Tactical Learning Modal */}
+      <UserControlModal
+        isOpen={userControlOpen}
+        onClose={() => setUserControlOpen(false)}
+        onUserChanged={(u) => setActiveUser(u)}
+      />
 
       {/* Bottom status line */}
       <footer className="w-full py-1 text-center text-[10px] text-stone-400 border-t border-stone-800/60 bg-stone-950/80">

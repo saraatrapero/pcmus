@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card } from '../types';
 import { FournierCard } from './FournierCard';
-import { getHandSum, evaluatePares } from '../musLogic';
+import { getHandSum, evaluatePares, getCardSumValue } from '../musLogic';
 
 interface CartoonPlayerHandsProps {
   cards: Card[];
@@ -68,7 +68,7 @@ export const CartoonPlayerHands: React.FC<CartoonPlayerHandsProps> = ({
         <div className="mt-1 flex items-center gap-2 bg-stone-950/85 border border-amber-500/60 px-3 py-0.5 rounded-full shadow-lg text-stone-200 text-[10px] sm:text-xs font-mono">
           <span className="text-amber-400 font-bold">Mano:</span>
           <span className="font-black text-amber-200">
-            {cards.map((c) => c.value).join('+')} =
+            {cards.map((c) => getCardSumValue(c.number)).join('+')} =
           </span>
           <span
             className={`font-black px-1.5 py-0.2 rounded ${

@@ -9,7 +9,10 @@ interface RetroDosOverlayProps {
   onExitGame: () => void;
   onOpenMultiplayer?: () => void;
   onOpenTutorial?: () => void;
+  onOpenUserControl?: () => void;
   gameMode: string;
+  gameSpeed?: 'tranquilo' | 'normal' | 'rapido';
+  onChangeGameSpeed?: () => void;
 }
 
 export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
@@ -19,7 +22,10 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
   onExitGame,
   onOpenMultiplayer,
   onOpenTutorial,
+  onOpenUserControl,
   gameMode,
+  gameSpeed = 'tranquilo',
+  onChangeGameSpeed,
 }) => {
   const [soundMuted, setSoundMuted] = React.useState(!sound.enabled);
   const [voiceEnabled, setVoiceEnabled] = React.useState(voiceEngine.enabled);
@@ -52,7 +58,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
       )}
 
       {/* Top Bar Navigation & Utility Controls */}
-      <header className="w-full max-w-5xl mx-auto px-4 py-2 flex items-center justify-between border-b border-stone-800 bg-stone-950/60 backdrop-blur rounded-b-2xl mb-2 select-none">
+      <header className="w-full max-w-5xl mx-auto px-4 py-2 flex items-center justify-between border-b border-stone-800 bg-stone-950 rounded-b-2xl mb-2 select-none shadow-md">
         <div className="flex items-center gap-2">
           <span className="font-serif font-black text-amber-400 text-lg tracking-wider">
             PC MUS <span className="text-xs text-stone-400 font-mono">1996</span>
@@ -67,6 +73,18 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* User Control & AI Learning shortcut button */}
+          {onOpenUserControl && (
+            <button
+              onClick={onOpenUserControl}
+              className="px-2.5 py-1 rounded-lg bg-amber-950/70 hover:bg-amber-900 border border-amber-500/70 text-xs font-bold text-amber-300 transition flex items-center gap-1.5 shadow"
+              title="Control de usuarios y aprendizaje adaptativo de la IA"
+            >
+              <span>🧠</span>
+              <span className="hidden sm:inline">IA & Usuarios</span>
+            </button>
+          )}
+
           {/* Tutorial shortcut button */}
           {onOpenTutorial && (
             <button
@@ -88,6 +106,18 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
             >
               <span>🌐</span>
               <span className="hidden md:inline">Multijugador</span>
+            </button>
+          )}
+
+          {/* Game Speed (Ritmo de juego) button */}
+          {onChangeGameSpeed && (
+            <button
+              onClick={onChangeGameSpeed}
+              className="px-2 py-1 sm:px-2.5 rounded-lg bg-stone-900 hover:bg-stone-800 border border-amber-600/60 text-xs font-mono font-bold text-amber-300 transition flex items-center gap-1.5 shadow"
+              title="Cambiar ritmo de juego y recuento: Pausado (recomendado) / Normal / Rápido"
+            >
+              <span>{gameSpeed === 'tranquilo' ? '🐢' : gameSpeed === 'normal' ? '⚖️' : '⚡'}</span>
+              <span className="hidden sm:inline capitalize">{gameSpeed === 'tranquilo' ? 'Pausado' : gameSpeed}</span>
             </button>
           )}
 

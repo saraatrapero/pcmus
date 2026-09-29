@@ -1,6 +1,7 @@
 import React from 'react';
 import { Player } from '../types';
 import { FournierCard } from './FournierCard';
+import { CharacterAvatar } from './CharacterAvatar';
 
 interface SeatedPlayerProps {
   player: Player;
@@ -19,66 +20,86 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
 }) => {
   const isPartner = player.team === 0;
 
+  // Safe placement for speech bubble:
+  // - North: Placed cleanly to the right of the avatar or above it, NEVER down over the cards
+  // - West: Placed cleanly above the avatar/cards, NEVER over the table or cards
+  // - East: Placed cleanly above the avatar/cards, NEVER over the table or cards
+  const speechBubblePlacement = {
+    north: 'left-full ml-3 top-1/2 -translate-y-1/2',
+    west: 'bottom-full mb-2 left-0',
+    east: 'bottom-full mb-2 right-0',
+  }[seatPosition];
+
+  const seatLabel = {
+    north: 'Norte (Compañero)',
+    west: 'Oeste (Rival)',
+    east: 'Este (Rival)',
+  }[seatPosition];
+
   return (
     <div className="relative flex flex-col items-center select-none z-20">
-      {/* Player Identity Plaque (Minimalist, elegant, no photos, no card obstruction) */}
-      <div
-        className={`
-          flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-lg backdrop-blur-md mb-1.5
-          transition-all duration-200
-          ${
-            player.currentSpeech
-              ? 'bg-amber-950/90 border-amber-400 ring-2 ring-amber-400 scale-105'
-              : 'bg-stone-950/85 border-amber-500/50'
-          }
-        `}
-      >
-        {/* Mano Marker Badge ("M") */}
-        {isMano && (
-          <span
-            className="w-5 h-5 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-[10px] flex items-center justify-center shadow"
-            title="Mano de la jugada"
-          >
-            M
-          </span>
-        )}
+      {/* 1. SEATED PLAYER CARD (Prominent portrait, clear role and visibility - Never covered) */}
+      <div className="relative flex items-center gap-2 mb-1.5 bg-stone-950 border-2 border-stone-800 hover:border-amber-500/80 px-2.5 py-1.5 rounded-2xl shadow-xl transition">
+        {/* Player Avatar: Prominent size 'md' (56px) so character is fully visible */}
+        <div className="relative shrink-0">
+          <CharacterAvatar
+            characterId={player.id}
+            characterName={player.name}
+            size="md"
+            isSpeaking={!!player.currentSpeech}
+            className="ring-2 ring-stone-900 shadow-md"
+          />
 
-        {/* Player Name */}
-        <span className="font-serif font-black text-xs sm:text-sm text-amber-200 truncate max-w-[110px] sm:max-w-[130px]">
-          {player.name}
-        </span>
+          {/* Mano Marker Badge ("M") pinned on avatar corner */}
+          {isMano && (
+            <span
+              className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-xs flex items-center justify-center shadow-lg border-2 border-stone-950 z-30 animate-bounce"
+              title="Mano de la ronda de Mus"
+            >
+              M
+            </span>
+          )}
+        </div>
 
-        {/* Team Tag */}
-        <span
-          className={`text-[8px] sm:text-[9px] font-mono font-black px-1.5 py-0.2 rounded uppercase tracking-wider ${
-            isPartner ? 'bg-emerald-800 text-emerald-100' : 'bg-rose-800 text-rose-100'
-          }`}
-        >
-          {isPartner ? 'Pareja' : 'Rival'}
-        </span>
+        {/* Player Nameplate, Position & Team Tag */}
+        <div className="flex flex-col min-w-0 pr-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-serif font-black text-sm sm:text-base text-amber-200 truncate max-w-[100px] sm:max-w-[140px]">
+              {player.name}
+            </span>
+            <span
+              className={`text-[8px] sm:text-[9px] font-mono font-black px-1.5 py-0.5 rounded uppercase tracking-wider shadow-xs ${
+                isPartner
+                  ? 'bg-emerald-700 text-emerald-100 border border-emerald-500/50'
+                  : 'bg-rose-800 text-rose-100 border border-rose-600/50'
+              }`}
+            >
+              {isPartner ? 'Pareja' : 'Rival'}
+            </span>
+          </div>
 
-        {/* Speaking Audio Indicator */}
-        {player.currentSpeech && (
-          <span className="text-amber-300 text-xs animate-bounce" title="Hablando">
-            🔊
-          </span>
-        )}
+          <div className="text-[10px] text-stone-400 font-mono flex items-center gap-1">
+            <span>{seatLabel}</span>
+          </div>
 
-        {/* Seña / Gesture Badge (Compact, non-intrusive) */}
-        {player.lastGesture && (
-          <span
-            className="bg-amber-400 text-stone-950 text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full border border-stone-950 shadow animate-pulse"
-            title={`Seña: ${player.lastGesture}`}
-          >
-            🤫 {player.lastGesture}
-          </span>
-        )}
+          {/* Seña / Gesture Badge if active */}
+          {player.lastGesture && (
+            <div className="mt-0.5">
+              <span
+                className="bg-amber-400 text-stone-950 text-[9px] font-mono font-black px-2 py-0.5 rounded-full border border-stone-950 shadow animate-pulse inline-block"
+                title={`Seña enviada: ${player.lastGesture}`}
+              >
+                🤫 {player.lastGesture}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* 4 Fournier Cards (100% visible, unobstructed, clean fanning) */}
+      {/* 3. FOUR SPANISH CARDS (100% visible, unobstructed, clean fanning with authentic figures) */}
       <div className="relative z-10 flex items-center justify-center -space-x-3 sm:-space-x-4">
         {player.cards.map((card, idx) => {
-          const rot = [-4, -1.5, 1.5, 4][idx] || 0;
+          const rot = [-5, -2, 2, 5][idx] || 0;
           return (
             <div
               key={card.id || idx}
@@ -86,13 +107,13 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
                 transform: `rotate(${rot}deg)`,
                 transformOrigin: 'bottom center',
               }}
-              className="transition-transform hover:-translate-y-1 hover:z-20"
+              className="transition-transform hover:-translate-y-2 hover:z-20"
             >
               <FournierCard
                 card={card}
                 hidden={!showAllCards}
                 size="sm"
-                className="shadow-[0_4px_10px_rgba(0,0,0,0.6)] border-2 border-stone-950"
+                className="shadow-[0_4px_12px_rgba(0,0,0,0.7)] border-2 border-stone-950"
               />
             </div>
           );
@@ -101,4 +122,3 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
     </div>
   );
 };
-

@@ -7,6 +7,7 @@ import {
   getChicaRanks,
 } from './musLogic';
 import { PC_MUS_CHARACTERS } from './characters';
+import { userProfileEngine } from './userProfileEngine';
 
 export type LanceActionType = 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero';
 
@@ -31,8 +32,18 @@ export function decideMusOrNoMus(player: Player): { wantsMus: boolean; speech: s
   const isSuperbHand = handSum === 31 || handSum === 32 || paresEval.level >= 2 || kings >= 3 || aces >= 3;
   const isGoodHand = handSum >= 31 || paresEval.level >= 1 || kings >= 2 || aces >= 2;
 
-  // AI may decide to cut mus based on aggression
-  const wantsToCut = isSuperbHand || (isGoodHand && Math.random() < player.aggressiveness);
+  // Adaptive learning factor against the user
+  const tactical = userProfileEngine.analyzeUser();
+  const isRivalTeam = player.team === 1; // Seats 1 and 3 are rivals to seat 0 (human user)
+
+  // If user is a rival and has high mus tendency (always wants discards), rival AI cuts mus more aggressively
+  let cutBonus = 0;
+  if (isRivalTeam && tactical.musTendency >= 70 && isGoodHand) {
+    cutBonus = 0.25; // Cut mus to deny user easy improvements
+  }
+
+  // AI may decide to cut mus based on aggression + tactical learning
+  const wantsToCut = isSuperbHand || (isGoodHand && Math.random() < (player.aggressiveness + cutBonus));
 
   if (wantsToCut) {
     const quote = char.dialogs.noMus[Math.floor(Math.random() * char.dialogs.noMus.length)];
@@ -65,12 +76,12 @@ export function getAIDiscardIndices(cards: Card[]): number[] {
     }
   });
 
-  // If keeping all, but not satisfied, discard the lowest non-essential card
-  if (discardIndices.length === 0 && sum < 31 && pares.level < 2) {
+  // According to Reglamento de Bizkaia (Art. IV, Punto 2):
+  // "Ningún jugador podrá quedarse con las cuatro cartas, obligatoriamente tendrá que pedir como mínimo una."
+  if (discardIndices.length === 0) {
     const sorted = cards
       .map((c, i) => ({ i, r: getMusRank(c.number) }))
       .sort((a, b) => a.r - b.r);
-    // Discard 1 or 2 cards
     discardIndices.push(sorted[0].i);
   }
 
@@ -132,16 +143,46 @@ export function decideLanceAction(
   const isTrailing = rivalScore - teamScore > 10;
   const isMatchPoint = teamScore >= 35 || rivalScore >= 35;
 
+  // Adaptive Learning Counter-Strategy against the human user (Seat 0)
+  const isRivalOfUser = player.team === 1;
+  const tactical = userProfileEngine.analyzeUser();
+  const counter = tactical.aiCounterStrategy;
+  const userWasLastBettor = betState.lastBettorIndex === 0;
+
+  // Effective thresholds modified by what the AI has learned from the user
+  let callThreshold = 4.5;
+  let ordagoCallThreshold = 8.5;
+
+  if (isRivalOfUser && userWasLastBettor) {
+    // If user bluffs a lot, AI call threshold drops (Cazador de faroles)
+    // If user is amarrategui, AI call threshold increases (respects bet, folds weak hands)
+    callThreshold += counter.callThresholdShift;
+    ordagoCallThreshold += (counter.callThresholdShift * 0.5);
+  }
+
   // SCENARIO 1: No bet yet (currentBet === 0)
   if (betState.currentBet === 0) {
+    // AI Trap tactic: If user is known to be overly aggressive, AI with strong hand (strength >= 8.5)
+    // may pass first (slow-play) to let the aggressive user fall into the trap.
+    if (isRivalOfUser && strength >= 8.5 && Math.random() < counter.trapTendency) {
+      return { action: 'paso', speech: 'Paso...' };
+    }
+
     // Should we Órdago?
-    if ((strength >= 9.5 && Math.random() < player.aggressiveness) || (isMatchPoint && strength >= 7) || (isBluffing && Math.random() < 0.2)) {
+    const ordagoPressure = (isRivalOfUser && tactical.riskTolerance <= 35) ? 0.2 : 0;
+    if (
+      (strength >= 9.5 && Math.random() < (player.aggressiveness + ordagoPressure)) ||
+      (isMatchPoint && strength >= 7) ||
+      (isBluffing && Math.random() < (0.2 + ordagoPressure))
+    ) {
       const speech = char.dialogs.ordago[Math.floor(Math.random() * char.dialogs.ordago.length)];
       return { action: 'ordago', speech };
     }
 
     // Should we Envido?
-    if (strength >= 5 || (Math.random() < player.aggressiveness * 0.6)) {
+    // Against an amarrategui user, AI steals pots easily with moderate strength (>= 3.8)
+    const stealThreshold = (isRivalOfUser && tactical.aggressiveness <= 35) ? 3.8 : 5.0;
+    if (strength >= stealThreshold || (Math.random() < (player.aggressiveness + counter.raiseTendencyShift) * 0.6)) {
       const speech = char.dialogs.envido[Math.floor(Math.random() * char.dialogs.envido.length)];
       return { action: 'envido', speech };
     }
@@ -156,8 +197,8 @@ export function decideLanceAction(
   // SCENARIO 2: Rival declared ÓRDAGO!
   if (betState.isOrdago) {
     // Want to accept órdago?
-    // Need top strength, or desperation
-    const willQuieroOrdago = strength >= 8.5 || (isTrailing && strength >= 7);
+    // Need top strength, or desperation, calibrated against user's bluff frequency
+    const willQuieroOrdago = strength >= ordagoCallThreshold || (isTrailing && strength >= (ordagoCallThreshold - 1.5));
     if (willQuieroOrdago) {
       const speech = char.dialogs.quiero[Math.floor(Math.random() * char.dialogs.quiero.length)];
       return { action: 'quiero', speech };
@@ -171,15 +212,15 @@ export function decideLanceAction(
   // Bet is at least 2
   if (strength >= 8.5) {
     // Super strong: can throw ÓRDAGO or raise Más
-    if (Math.random() < 0.35) {
+    if (Math.random() < 0.35 + counter.raiseTendencyShift) {
       const speech = char.dialogs.ordago[Math.floor(Math.random() * char.dialogs.ordago.length)];
       return { action: 'ordago', speech };
     } else {
       const speech = `¡Dos más, y son ${betState.currentBet + 2}!`;
       return { action: 'mas', speech };
     }
-  } else if (strength >= 4.5 || isBluffing) {
-    // Good enough to accept ("Quiero")
+  } else if (strength >= callThreshold || isBluffing) {
+    // Good enough to accept ("Quiero") - modulated by user learning!
     const speech = char.dialogs.quiero[Math.floor(Math.random() * char.dialogs.quiero.length)];
     return { action: 'quiero', speech };
   } else {

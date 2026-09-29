@@ -4,6 +4,7 @@ import { GameMode } from '../types';
 import { sound } from '../sound';
 import { voiceEngine } from '../voiceEngine';
 import { CharacterAvatar } from './CharacterAvatar';
+import { userProfileEngine } from '../userProfileEngine';
 
 interface CharacterSelectProps {
   onStartGame: (
@@ -15,17 +16,22 @@ interface CharacterSelectProps {
   ) => void;
   onOpenMultiplayer: () => void;
   onOpenTutorial: () => void;
+  onOpenUserControl?: () => void;
 }
 
 export const CharacterSelect: React.FC<CharacterSelectProps> = ({
   onStartGame,
   onOpenMultiplayer,
   onOpenTutorial,
+  onOpenUserControl,
 }) => {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('tio_gil');
   const [selectedPartnerId, setSelectedPartnerId] = useState<string>('el_marques');
   const [gameMode, setGameMode] = useState<GameMode>('torneo');
   const [targetPiedras, setTargetPiedras] = useState<number>(40);
+
+  const activeUser = userProfileEngine.getActiveUser();
+  const tactical = userProfileEngine.analyzeUser(activeUser);
 
   const playerChar = PC_MUS_CHARACTERS.find((c) => c.id === selectedPlayerId)!;
   const partnerChar = PC_MUS_CHARACTERS.find((c) => c.id === selectedPartnerId)!;
@@ -57,6 +63,34 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
         <p className="text-sm text-stone-400 mt-1 max-w-xl mx-auto">
           El legendario simulador de mus español con los personajes de la farándula de los 90.
         </p>
+
+        {/* User Profile & AI Intelligence Bar */}
+        {onOpenUserControl && (
+          <div className="mt-3.5 inline-flex flex-col sm:flex-row items-center gap-3 px-4 py-2 rounded-2xl bg-stone-950 border-2 border-amber-500/70 shadow-lg text-left">
+            <div className="flex items-center gap-2.5">
+              <CharacterAvatar characterId={activeUser.avatarId} characterName={activeUser.name} size="sm" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold text-stone-400">JUGADOR ACTIVO:</span>
+                  <span className="font-serif font-black text-amber-300 text-sm">{activeUser.name}</span>
+                  <span className="text-[9px] font-mono font-black px-1.5 py-0.2 rounded bg-amber-400 text-stone-950">
+                    {tactical.archetype}
+                  </span>
+                </div>
+                <div className="text-[10px] font-mono text-stone-300">
+                  La IA ha aprendido tu juego: Agresividad {tactical.aggressiveness}% • Riesgo {tactical.riskTolerance}%
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenUserControl}
+              className="sm:ml-3 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs shadow transition active:scale-95 cursor-pointer whitespace-nowrap"
+            >
+              👤 Control de Usuarios & IA
+            </button>
+          </div>
+        )}
 
         {/* Quick Launch Action Cards for Multiplayer, Tutorial, and Mesa Tradicional */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 max-w-4xl mx-auto">
