@@ -1,9 +1,10 @@
 import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
-import { Player, LancePhase, LanceBetState, TeamScore, Seña } from '../types';
+import { Player, LancePhase, LanceBetState, TeamScore, Seña, Card } from '../types';
 import { GazeTarget, IntelState, SEAT_NAMES, señaShortLabel } from '../gazeSystem';
 import { SeatedPlayer } from './SeatedPlayer';
 import { CartoonPlayerHands } from './CartoonPlayerHands';
 import { CharacterAvatar } from './CharacterAvatar';
+import { FournierCard } from './FournierCard';
 import { UserProfile } from '../userProfileEngine';
 import tabernaLimpiaImg from '../assets/images/taberna_madrid_limpia_1790674574086.jpg';
 
@@ -33,6 +34,68 @@ interface TableProps {
 
 type Point = { x: number; y: number };
 
+// Realistic 3D garbanzo / amarraco
+const Garbanzo: React.FC<{ amarraco?: boolean; style?: React.CSSProperties }> = ({ amarraco = false, style }) => (
+  <div
+    style={style}
+    className={`absolute rounded-full border border-stone-950/80 shadow-[1px_2px_3px_rgba(0,0,0,0.7)] ${
+      amarraco
+        ? 'w-4 h-4 sm:w-[18px] sm:h-[18px] bg-[radial-gradient(circle_at_35%_30%,#fde68a,#d97706_55%,#78350f)]'
+        : 'w-3 h-3 sm:w-3.5 sm:h-3.5 bg-[radial-gradient(circle_at_35%_30%,#fef3c7,#e0b26a_55%,#8a5a1c)]'
+    }`}
+    title={amarraco ? 'Amarraco (5 piedras)' : 'Piedra'}
+  />
+);
+
+// Deterministic scatter so stones don't jump around between renders
+const scatter = (i: number, radius: number) => {
+  const angle = i * 2.399963; // golden angle
+  const r = radius * Math.sqrt((i + 0.5) / 14);
+  return { left: `calc(50% + ${(Math.cos(angle) * r).toFixed(1)}px)`, top: `calc(50% + ${(Math.sin(angle) * r).toFixed(1)}px)` };
+};
+
+// A pile of stones on the felt (amarracos of 5 + loose piedras)
+const StonePile: React.FC<{ count: number; radius?: number; className?: string; title?: string }> = ({
+  count,
+  radius = 22,
+  className = '',
+  title,
+}) => {
+  const amarracos = Math.min(6, Math.floor(count / 5));
+  const singles = Math.min(10, count % 5 + (count >= 35 ? 5 : 0));
+  const items = [...Array(amarracos).fill(true), ...Array(singles).fill(false)];
+  return (
+    <div className={`absolute w-14 h-14 -translate-x-1/2 -translate-y-1/2 ${className}`} title={title}>
+      {items.map((am, i) => (
+        <Garbanzo key={i} amarraco={am} style={{ ...scatter(i, radius), transform: 'translate(-50%,-50%)' }} />
+      ))}
+    </div>
+  );
+};
+
+// Cards lying face down in front of a seat, rotated towards that player
+const CardFan: React.FC<{ cards: Card[]; rotation: number; showAllCards: boolean }> = ({
+  cards,
+  rotation,
+  showAllCards,
+}) => (
+  <div className="flex items-center justify-center -space-x-8 sm:-space-x-7" style={{ transform: `rotate(${rotation}deg)` }}>
+    {cards.map((card, idx) => (
+      <div
+        key={card.id || idx}
+        style={{ transform: `rotate(${[-9, -3, 3, 9][idx] || 0}deg) translateY(${[3, 0, 0, 3][idx] || 0}px)` }}
+      >
+        <FournierCard
+          card={card}
+          hidden={!showAllCards}
+          size="sm"
+          className="shadow-[0_3px_6px_rgba(0,0,0,0.65)] border border-stone-950"
+        />
+      </div>
+    ))}
+  </div>
+);
+
 export const Table: React.FC<TableProps> = ({
   players,
   manoIndex,
@@ -44,7 +107,6 @@ export const Table: React.FC<TableProps> = ({
   recentEvent,
   scoreTeam0,
   scoreTeam1,
-  targetPiedras,
   onOpenUserControl,
   activeUser,
   gameSpeed = 'tranquilo',
@@ -59,11 +121,9 @@ export const Table: React.FC<TableProps> = ({
   // Head positions (relative to the table container) to draw the lines of sight
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headEls = useRef<(HTMLDivElement | null)[]>([null, null, null, null]);
-  const tableSurfaceRef = useRef<HTMLDivElement | null>(null);
   const [headPoints, setHeadPoints] = useState<(Point | null)[]>([null, null, null, null]);
-  const [tableCenter, setTableCenter] = useState<Point | null>(null);
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
-  const [resizeTick, setResizeTick] = useState(0);
+  const [, setResizeTick] = useState(0);
 
   useEffect(() => {
     const onResize = () => setResizeTick((t) => t + 1);
@@ -75,13 +135,11 @@ export const Table: React.FC<TableProps> = ({
     const container = containerRef.current;
     if (!container) return;
     const base = container.getBoundingClientRect();
-    const center = (el: Element | null): Point | null => {
+    const pts = headEls.current.map((el): Point | null => {
       if (!el) return null;
       const r = el.getBoundingClientRect();
       return { x: r.left - base.left + r.width / 2, y: r.top - base.top + r.height / 2 };
-    };
-    const pts = headEls.current.map((el) => center(el));
-    const tc = center(tableSurfaceRef.current);
+    });
     const same =
       pts.every((p, i) => {
         const q = headPoints[i];
@@ -89,11 +147,9 @@ export const Table: React.FC<TableProps> = ({
         return Math.abs(p.x - q.x) < 2 && Math.abs(p.y - q.y) < 2;
       }) &&
       Math.abs(base.width - size.w) < 2 &&
-      Math.abs(base.height - size.h) < 2 &&
-      !!tc === !!tableCenter;
+      Math.abs(base.height - size.h) < 2;
     if (!same) {
       setHeadPoints(pts);
-      setTableCenter(tc);
       setSize({ w: base.width, h: base.height });
     }
   });
@@ -118,45 +174,56 @@ export const Table: React.FC<TableProps> = ({
   // Active dialogue across any player
   const activeSpeakingPlayer = players.find((p) => !!p.currentSpeech);
 
-  // Realistic 3D Garbanzo / Amarraco element with stamped numerical value
-  const renderGarbanzo = (key: string | number, isAmarraco: boolean = false, className: string = '') => (
-    <div
-      key={key}
-      className={`rounded-full border border-stone-950 shadow-[1px_2px_4px_rgba(0,0,0,0.6)] relative inline-flex items-center justify-center font-mono font-black select-none ${
-        isAmarraco
-          ? 'w-4 h-4 sm:w-5 sm:h-5 bg-gradient-to-br from-yellow-300 via-amber-500 to-amber-800 text-stone-950 text-[9px]'
-          : 'w-3.5 h-3.5 sm:w-4 sm:h-4 bg-gradient-to-br from-amber-100 via-amber-300 to-amber-700 text-stone-900 text-[8px]'
-      } ${className}`}
-      title={isAmarraco ? 'Amarraco (Valor: 5 piedras)' : 'Piedra (Valor: 1 piedra)'}
-    >
-      <span className="leading-none">{isAmarraco ? '5' : '1'}</span>
-      <div className="absolute top-0.5 left-0.5 w-1 h-1 rounded-full bg-white opacity-80 pointer-events-none" />
-    </div>
-  );
+  const seatProps = (seat: 1 | 2 | 3) => ({
+    seatIndex: seat,
+    isMano: manoIndex === seat,
+    gaze: gazes[seat] ?? -1,
+    isWatchedByYou: humanGaze === seat,
+    knownByYourTeam: intelYourTeam[seat] || [],
+    knowsYourSeñas: seat === 2 ? [] : intelRivals[0] || [],
+    onWatch: onSetHumanGaze ? () => onSetHumanGaze(humanGaze === seat ? -1 : seat) : undefined,
+    headRef: setHeadRef(seat),
+  });
+
+  // Where the deck rests: in front of the mano
+  const deckPosition = (
+    {
+      0: 'left-1/2 bottom-[17%] -translate-x-1/2',
+      1: 'right-[22%] top-[62%]',
+      2: 'left-1/2 top-[19%] -translate-x-1/2',
+      3: 'left-[22%] top-[62%]',
+    } as Record<number, string>
+  )[manoIndex];
+
+  const potStones = betState.isOrdago ? 14 : betState.currentBet;
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col justify-between min-h-[500px] sm:min-h-[540px]">
-      {/* 1. TAVERN BAR BACKGROUND (Clean wallpaper, no UI, no bottom settings/icons) */}
+    <div
+      ref={containerRef}
+      className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col"
+    >
+      {/* 1. TAVERN BACKGROUND */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <img
           src={tabernaLimpiaImg}
           alt="Taberna Tradicional PC Mus"
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover object-top pointer-events-none transition-all duration-700"
+          className="w-full h-full object-cover object-top pointer-events-none transition-all duration-700 blur-[1.5px] scale-105"
         />
-        {/* Warm nighttime lighting vignette */}
         <div
           className={`absolute inset-0 pointer-events-none transition-colors duration-500 ${
             isNight
-              ? 'bg-gradient-to-t from-stone-950/85 via-amber-950/20 to-black/50'
-              : 'bg-gradient-to-t from-stone-950/60 via-transparent to-black/30'
+              ? 'bg-gradient-to-t from-stone-950/90 via-amber-950/35 to-black/60'
+              : 'bg-gradient-to-t from-stone-950/65 via-black/10 to-black/35'
           }`}
         />
+        {/* Warm pool of light from the lamp hanging over the table */}
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_45%_55%_at_50%_48%,rgba(255,196,110,0.22),transparent_70%)]" />
       </div>
 
       {/* LINES OF SIGHT: who is looking at whom (red when someone is watching you) */}
       <svg
-        className="absolute inset-0 z-[25] pointer-events-none"
+        className="absolute inset-0 z-[35] pointer-events-none"
         width={size.w}
         height={size.h}
         viewBox={`0 0 ${size.w} ${size.h}`}
@@ -168,14 +235,7 @@ export const Table: React.FC<TableProps> = ({
           if (!to) return null;
           const watchingYou = target === 0;
           const isHuman = seat === 0;
-          const color = isHuman
-            ? '#38bdf8'
-            : watchingYou
-            ? '#f43f5e'
-            : seat % 2 === 0
-            ? '#34d399'
-            : '#fb7185';
-          // Stop the line slightly before the target head
+          const color = isHuman ? '#38bdf8' : watchingYou ? '#f43f5e' : seat % 2 === 0 ? '#34d399' : '#fb7185';
           const dx = to.x - from.x;
           const dy = to.y - from.y;
           const len = Math.hypot(dx, dy) || 1;
@@ -191,7 +251,7 @@ export const Table: React.FC<TableProps> = ({
                 stroke={color}
                 strokeWidth={watchingYou || isHuman ? 2.5 : 1.5}
                 strokeDasharray="6 5"
-                strokeOpacity={watchingYou || isHuman ? 0.9 : 0.55}
+                strokeOpacity={watchingYou || isHuman ? 0.9 : 0.5}
               >
                 <animate attributeName="stroke-dashoffset" from="22" to="0" dur="0.9s" repeatCount="indefinite" />
               </line>
@@ -201,246 +261,254 @@ export const Table: React.FC<TableProps> = ({
         })}
       </svg>
 
-      {/* TOP UTILITY BAR (Controls on sides, clean space in center) */}
-      <div className="relative z-30 flex items-center justify-between px-3 pt-2">
+      {/* 2. HUD (outside the table): settings · current lance & bet · AI profile */}
+      <div className="relative z-40 flex flex-wrap items-center justify-between gap-1.5 px-2 sm:px-3 pt-2">
         <div className="flex items-center gap-1.5">
-          {/* 🌙 Atmósfera de Noche Toggle Pill */}
           <button
             type="button"
             onClick={() => setIsNight(!isNight)}
-            className="px-3 py-1 rounded-full bg-stone-950/85 hover:bg-stone-900 border border-amber-500/70 hover:border-amber-400 text-amber-200 font-mono text-[10px] sm:text-xs flex items-center gap-1.5 shadow-xl transition transform hover:scale-105 cursor-pointer"
-            title="Cambiar atmósfera de iluminación (Noche de taberna tradicional / Tarde)"
+            className="px-2.5 py-1 rounded-full bg-stone-950/85 hover:bg-stone-900 border border-amber-500/70 text-amber-200 font-mono text-[10px] sm:text-xs shadow-xl transition cursor-pointer"
+            title="Cambiar atmósfera de iluminación"
           >
-            <span>{isNight ? '🌙 Noche' : '☀️ Tarde'}</span>
+            {isNight ? '🌙' : '☀️'}
+            <span className="hidden sm:inline"> {isNight ? 'Noche' : 'Tarde'}</span>
           </button>
-
-          {/* ⏱ Ritmo de Partida Toggle Pill */}
           {onChangeGameSpeed && (
             <button
               type="button"
               onClick={onChangeGameSpeed}
-              className="px-3 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 hover:border-amber-400 text-amber-300 font-mono text-[10px] sm:text-xs flex items-center gap-1.5 shadow-xl transition transform hover:scale-105 cursor-pointer"
-              title="Cambiar velocidad de la partida y del recuento de tantos (Pausado / Normal / Rápido)"
+              className="px-2.5 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 text-amber-300 font-mono text-[10px] sm:text-xs shadow-xl transition cursor-pointer"
+              title="Cambiar velocidad de la partida"
             >
-              <span>{gameSpeed === 'tranquilo' ? '🐢' : gameSpeed === 'normal' ? '⚖️' : '⚡'}</span>
-              <span className="capitalize">{gameSpeed === 'tranquilo' ? 'Pausado' : gameSpeed}</span>
+              {gameSpeed === 'tranquilo' ? '🐢' : gameSpeed === 'normal' ? '⚖️' : '⚡'}
+              <span className="hidden sm:inline capitalize"> {gameSpeed === 'tranquilo' ? 'Pausado' : gameSpeed}</span>
             </button>
           )}
         </div>
 
-        {/* 💬 RECOLOCATED DIALOGUE TICKER (Clean banner at top center, never blocking players) */}
-        {activeSpeakingPlayer && activeSpeakingPlayer.currentSpeech ? (
-          <div className="mx-2 bg-stone-950/95 border-2 border-amber-400 text-amber-100 px-3 py-1 rounded-full text-xs font-mono font-bold shadow-2xl flex items-center gap-2 max-w-sm sm:max-w-md animate-fade-in pointer-events-none">
-            <span className="text-amber-400 font-serif font-black shrink-0">
-              💬 {activeSpeakingPlayer.name}:
-            </span>
-            <span className="text-white font-mono truncate">
-              "{activeSpeakingPlayer.currentSpeech}"
-            </span>
+        <div className="flex items-center gap-1.5 order-last sm:order-none w-full sm:w-auto justify-center">
+          <div className="bg-blue-950/90 border-2 border-yellow-400 px-3 py-0.5 rounded-xl shadow-lg text-center">
+            <span className="text-[8px] uppercase tracking-widest text-amber-200 font-mono font-black mr-1.5">Lance</span>
+            <span className="text-xs sm:text-sm uppercase text-white font-serif font-black">{currentLanceName}</span>
           </div>
-        ) : recentEvent ? (
-          <div className="mx-2 bg-black/60 border border-amber-500/30 text-amber-200/90 px-3 py-1 rounded-full text-[11px] font-mono shadow truncate max-w-xs sm:max-w-sm">
-            {recentEvent}
-          </div>
-        ) : (
-          <div className="h-6" />
-        )}
+          {betState.currentBet > 0 && (
+            <div className="bg-amber-400 text-stone-950 px-2.5 py-0.5 rounded-full border-2 border-stone-950 font-mono font-black text-[10px] sm:text-xs shadow flex items-center gap-1">
+              {betState.isOrdago ? '🔥 ÓRDAGO' : `🪙 ${betState.currentBet} piedras`}
+              {betState.accepted && (
+                <span className="bg-emerald-700 text-white text-[8px] px-1 rounded uppercase">Quiero</span>
+              )}
+            </div>
+          )}
+        </div>
 
-        {/* 🧠 IA Adaptativa & Control de Usuarios Indicator Button */}
         {onOpenUserControl && (
           <button
             type="button"
             onClick={onOpenUserControl}
-            className="px-3 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 hover:border-amber-400 text-amber-300 font-mono text-[10px] sm:text-xs flex items-center gap-1.5 shadow-xl transition transform hover:scale-105 cursor-pointer"
+            className="px-2.5 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 text-amber-300 font-mono text-[10px] sm:text-xs shadow-xl transition cursor-pointer flex items-center gap-1"
             title="Abrir panel de control de usuarios y análisis táctico de la IA"
           >
-            <span>🧠 IA Adaptada:</span>
-            <span className="text-white font-bold max-w-[80px] sm:max-w-[120px] truncate">
-              {activeUser?.name || 'Tú'}
-            </span>
+            🧠<span className="hidden sm:inline">IA:</span>
+            <span className="text-white font-bold max-w-[70px] sm:max-w-[110px] truncate">{activeUser?.name || 'Tú'}</span>
           </button>
         )}
       </div>
 
-      {/* 2. NORTH SEATED PLAYER (Center-Top across table - Fully Visible) */}
-      <div className="relative z-30 pt-1 flex justify-center">
-        {pNorth && (
-          <SeatedPlayer
-            player={pNorth}
-            seatPosition="north"
-              seatIndex={2}
-            isMano={manoIndex === 2}
-            showAllCards={showAllCards}
-            gaze={gazes[2] ?? -1}
-            isWatchedByYou={humanGaze === 2}
-            knownByYourTeam={intelYourTeam[2] || []}
-            onWatch={onSetHumanGaze ? () => onSetHumanGaze(humanGaze === 2 ? -1 : 2) : undefined}
-            headRef={setHeadRef(2)}
-          />
-        )}
+      {/* 3. DIALOGUE / EVENT TICKER (outside the table, never covering it) */}
+      <div className="relative z-40 flex justify-center px-2 pt-1.5 min-h-[30px]">
+        {activeSpeakingPlayer && activeSpeakingPlayer.currentSpeech ? (
+          <div className="bg-stone-950/95 border-2 border-amber-400 text-amber-100 px-3 py-0.5 rounded-full text-[11px] sm:text-xs font-mono font-bold shadow-2xl flex items-center gap-2 max-w-full pointer-events-none">
+            <span className="text-amber-400 font-serif font-black shrink-0">💬 {activeSpeakingPlayer.name}:</span>
+            <span className="text-white truncate">"{activeSpeakingPlayer.currentSpeech}"</span>
+          </div>
+        ) : recentEvent ? (
+          <div className="bg-black/65 border border-amber-500/30 text-amber-200/90 px-3 py-0.5 rounded-full text-[10px] sm:text-[11px] font-mono shadow truncate max-w-full">
+            {recentEvent}
+          </div>
+        ) : null}
       </div>
 
-      {/* 3. THE OVAL WOODEN TABLE & WEST/EAST PLAYERS */}
-      <div className="relative z-20 flex-1 flex items-center justify-between px-2 sm:px-4 my-1">
-        {/* WEST SEATED PLAYER (Left - Fully Visible) */}
-        <div className="relative z-30 flex-shrink-0">
-          {pWest && (
-            <SeatedPlayer
-              player={pWest}
-              seatPosition="west"
-              seatIndex={3}
-              isMano={manoIndex === 3}
-              showAllCards={showAllCards}
-              gaze={gazes[3] ?? -1}
-              isWatchedByYou={humanGaze === 3}
-              knownByYourTeam={intelYourTeam[3] || []}
-              knowsYourSeñas={intelRivals[0] || []}
-              onWatch={onSetHumanGaze ? () => onSetHumanGaze(humanGaze === 3 ? -1 : 3) : undefined}
-              headRef={setHeadRef(3)}
-            />
-          )}
+      {/* 4. THE ROOM: West | (North + vertical table) | East */}
+      <div className="relative z-20 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0.5 sm:gap-2 px-1 sm:px-4 pt-1">
+        {/* WEST */}
+        <div className="flex justify-end">
+          {pWest && <SeatedPlayer player={pWest} seatPosition="west" {...seatProps(3)} />}
         </div>
 
-        {/* OVAL WOODEN TABLE SURFACE */}
-        <div ref={tableSurfaceRef} className="flex-1 mx-2 sm:mx-4 h-full min-h-[160px] sm:min-h-[180px] rounded-[100px] border-[5px] sm:border-[7px] border-[#381a06] bg-gradient-to-b from-[#d99f60] via-[#c68945] to-[#b06f2d] shadow-[inset_0_4px_25px_rgba(0,0,0,0.6),0_12px_24px_rgba(0,0,0,0.8)] relative p-3 flex flex-col items-center justify-between overflow-hidden">
-          {/* Wooden planks horizontal texture lines */}
-          <div
-            className="absolute inset-0 opacity-15 pointer-events-none"
-            style={{
-              backgroundImage: `repeating-linear-gradient(0deg, #261203 0px, #261203 2px, transparent 2px, transparent 36px)`,
-            }}
-          />
-
-          {/* TABLE OBJECT 1: DECK OF SPANISH CARDS (Taco de baraja sobre la mesa) */}
-          <div
-            className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center z-10 hidden sm:flex"
-            title="Baraja Española de 40 naipes (Heraclio Fournier 1996)"
-          >
-            <div className="w-10 h-15 rounded-lg border-2 border-stone-950 bg-red-800 shadow-[3px_4px_8px_rgba(0,0,0,0.7)] relative overflow-hidden transform -rotate-12">
-              <div className="absolute inset-0.5 border border-amber-400/40 bg-gradient-to-br from-red-950 to-red-800 flex items-center justify-center">
-                <span className="text-[8px] font-mono font-black text-amber-300 opacity-90">
-                  40
-                </span>
-              </div>
+        {/* CENTER COLUMN */}
+        <div className="flex flex-col items-center">
+          {pNorth && (
+            <div className="relative z-10 -mb-3">
+              <SeatedPlayer player={pNorth} seatPosition="north" {...seatProps(2)} />
             </div>
-            <div className="w-9 h-1.5 bg-stone-900 rounded-b -mt-0.5 transform -rotate-12 shadow" />
-          </div>
+          )}
 
-          {/* Center: Sleek Lance Status Placard (Crisp, high-contrast, centered) */}
-          <div className="my-auto z-20 flex flex-col items-center max-w-xs text-center">
-            {/* Lance Banner */}
-            <div className="bg-blue-900 border-2 border-yellow-400 px-4 py-1.5 rounded-xl shadow-lg text-yellow-300 font-mono font-black">
-              <div className="text-[9px] uppercase tracking-widest text-amber-200 leading-none">
-                LANCE ACTUAL
-              </div>
-              <div className="text-base sm:text-xl uppercase text-white font-serif font-black">
-                {currentLanceName}
-              </div>
-            </div>
+          {/* VERTICAL MUS TABLE: wooden rail + green baize, slightly tilted for perspective */}
+          <div className="relative" style={{ perspective: '900px' }}>
+            {/* Floor shadow */}
+            <div className="absolute -inset-x-4 -bottom-5 h-16 rounded-[50%] bg-black/60 blur-xl" />
+            <div
+              className="relative w-[min(44vw,210px)] sm:w-[270px] md:w-[310px] aspect-[3/4] rounded-[48%/40%] p-[10px] sm:p-[14px] shadow-[0_18px_30px_rgba(0,0,0,0.75)]"
+              style={{
+                transform: 'rotateX(10deg)',
+                transformOrigin: '50% 60%',
+                background:
+                  'repeating-linear-gradient(100deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 9px), linear-gradient(160deg, #8a4b1f 0%, #5c2d0e 45%, #3b1b07 100%)',
+              }}
+            >
+              {/* Rail highlight */}
+              <div className="absolute inset-[3px] rounded-[48%/40%] border border-amber-300/30 pointer-events-none" />
+              {/* Felt */}
+              <div
+                className="relative w-full h-full rounded-[46%/38%] overflow-hidden shadow-[inset_0_0_28px_rgba(0,0,0,0.75),inset_0_0_4px_rgba(0,0,0,0.9)]"
+                style={{
+                  background:
+                    'radial-gradient(ellipse 70% 55% at 50% 45%, #2f8a52 0%, #1f6a3c 55%, #134a29 100%)',
+                }}
+              >
+                {/* Baize fibre texture */}
+                <div
+                  className="absolute inset-0 opacity-25 mix-blend-overlay pointer-events-none"
+                  style={{
+                    backgroundImage:
+                      'repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 3px), repeating-linear-gradient(-45deg, rgba(0,0,0,0.12) 0 1px, transparent 1px 3px)',
+                  }}
+                />
+                {/* Lamp reflection */}
+                <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_40%_30%_at_50%_42%,rgba(255,230,170,0.22),transparent_70%)]" />
+                {/* Stitched inner line */}
+                <div className="absolute inset-[7%] rounded-[46%/38%] border border-dashed border-emerald-200/15 pointer-events-none" />
 
-            {/* Active Bet Indicator */}
-            {betState.currentBet > 0 && (
-              <div className="mt-1 bg-amber-400 text-stone-950 px-3 py-0.5 rounded-full border-2 border-stone-950 font-mono font-black text-xs shadow flex items-center gap-1.5">
-                <span>
-                  {betState.isOrdago
-                    ? '🔥 ¡ÓRDAGO VIVO!'
-                    : `🪙 APUESTA: ${betState.currentBet} PIEDRAS`}
-                </span>
-                {betState.accepted && (
-                  <span className="bg-emerald-700 text-white text-[8px] px-1.5 py-0.2 rounded uppercase">
-                    Quiero
-                  </span>
+                {/* North's cards */}
+                {pNorth && (
+                  <div className="absolute left-1/2 top-[3%] -translate-x-1/2 scale-[0.8] sm:scale-100 origin-top">
+                    <CardFan cards={pNorth.cards} rotation={180} showAllCards={showAllCards} />
+                  </div>
                 )}
+                {/* West's cards */}
+                {pWest && (
+                  <div className="absolute left-[-6%] sm:left-[-2%] top-1/2 -translate-y-1/2 scale-[0.75] sm:scale-100">
+                    <CardFan cards={pWest.cards} rotation={90} showAllCards={showAllCards} />
+                  </div>
+                )}
+                {/* East's cards */}
+                {pEast && (
+                  <div className="absolute right-[-6%] sm:right-[-2%] top-1/2 -translate-y-1/2 scale-[0.75] sm:scale-100">
+                    <CardFan cards={pEast.cards} rotation={-90} showAllCards={showAllCards} />
+                  </div>
+                )}
+
+                {/* Deck resting in front of the mano */}
+                <div className={`absolute ${deckPosition} transition-all duration-700`} title="Baraja Española de 40 naipes">
+                  <div className="relative w-7 h-10 sm:w-8 sm:h-12 rotate-[-14deg]">
+                    {[3, 2, 1, 0].map((o) => (
+                      <div
+                        key={o}
+                        className="absolute inset-0 rounded-md border border-stone-950 bg-gradient-to-br from-red-800 to-red-950 shadow-[1px_2px_3px_rgba(0,0,0,0.6)]"
+                        style={{ transform: `translate(${o * 1}px, ${-o * 1.2}px)` }}
+                      >
+                        <div className="absolute inset-0.5 rounded border border-amber-400/40" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pot: the stones at stake in the current lance */}
+                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" title={betState.currentBet > 0 ? `En juego: ${betState.isOrdago ? 'Órdago' : betState.currentBet + ' piedras'}` : 'Bote vacío'}>
+                  <div className="relative w-11 h-11 sm:w-20 sm:h-20 rounded-full bg-[radial-gradient(circle_at_40%_35%,#7a4a22,#4a2a10_70%)] border-2 border-[#2b1606] shadow-[inset_0_3px_8px_rgba(0,0,0,0.7),0_3px_6px_rgba(0,0,0,0.5)]">
+                    <StonePile count={potStones} radius={14} className="left-1/2 top-1/2" />
+                    {betState.isOrdago && (
+                      <span className="absolute inset-0 flex items-center justify-center text-2xl animate-pulse">🔥</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Each team's stones, next to its players */}
+                <StonePile
+                  count={scoreTeam0?.piedras || 0}
+                  className="left-[70%] top-[80%]"
+                  title={`Piedras de tu pareja: ${scoreTeam0?.piedras || 0}`}
+                />
+                <StonePile
+                  count={scoreTeam1?.piedras || 0}
+                  className="left-[30%] top-[22%]"
+                  title={`Piedras rivales: ${scoreTeam1?.piedras || 0}`}
+                />
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* EAST SEATED PLAYER (Right - Fully Visible) */}
-        <div className="relative z-30 flex-shrink-0">
-          {pEast && (
-            <SeatedPlayer
-              player={pEast}
-              seatPosition="east"
-              seatIndex={1}
-              isMano={manoIndex === 1}
-              showAllCards={showAllCards}
-              gaze={gazes[1] ?? -1}
-              isWatchedByYou={humanGaze === 1}
-              knownByYourTeam={intelYourTeam[1] || []}
-              knowsYourSeñas={intelRivals[0] || []}
-              onWatch={onSetHumanGaze ? () => onSetHumanGaze(humanGaze === 1 ? -1 : 1) : undefined}
-              headRef={setHeadRef(1)}
-            />
-          )}
+        {/* EAST */}
+        <div className="flex justify-start">
+          {pEast && <SeatedPlayer player={pEast} seatPosition="east" {...seatProps(1)} />}
         </div>
       </div>
 
-      {/* 4. SOUTH: HUMAN PLAYER PRESENCE & CARDS (Bottom Center - Clear player presence + 100% Unobstructed Hand) */}
-      <div className="relative z-30 flex flex-col items-center pb-2 pt-1">
-        {/* South Player Badge with prominent Avatar (Crisp, sharp, non-blurry, never covering cards) */}
-        {pSouth && (
-          <div className="flex items-center gap-2.5 mb-1 px-3.5 py-1.5 rounded-2xl bg-stone-950 border-2 border-stone-800 hover:border-amber-500/70 shadow-xl">
+      {/* 5. SOUTH: your hand rests over the near edge of the table */}
+      {pSouth && (
+        <div className="relative z-30 -mt-3 sm:-mt-5 flex flex-col items-center">
+          <CartoonPlayerHands
+            cards={pSouth.cards}
+            selectedIndices={pSouth.selectedToDiscard}
+            isDiscardPhase={isDiscardPhase}
+            onCardClick={onCardClick}
+          />
+        </div>
+      )}
+
+      {/* 6. YOUR SEAT PANEL (below the table): you, your eyes and your señas */}
+      {pSouth && (
+        <div className="relative z-40 flex flex-col items-center gap-1 px-2 pb-2">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 bg-stone-950/90 border border-sky-600/60 rounded-2xl px-2 py-1 shadow-lg max-w-full">
             <div className="relative shrink-0" ref={setHeadRef(0)}>
               <CharacterAvatar
                 characterId={activeUser?.avatarId || pSouth.id}
                 characterName={activeUser?.name || pSouth.name}
-                size="md"
+                size="sm"
                 isSpeaking={!!pSouth.currentSpeech}
-                className="ring-2 ring-stone-900 shadow-md"
+                className="ring-2 ring-stone-900"
               />
               {manoIndex === 0 && (
                 <span
-                  className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-xs flex items-center justify-center shadow-lg border-2 border-stone-950 z-30 animate-bounce"
+                  className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-[10px] flex items-center justify-center shadow-lg border-2 border-stone-950"
                   title="Mano de la ronda de Mus"
                 >
                   M
                 </span>
               )}
             </div>
-
-            <div className="flex flex-col min-w-0 pr-1">
-              <div className="flex items-center gap-1.5">
-                <span className="font-serif font-black text-sm sm:text-base text-amber-200 truncate max-w-[120px] sm:max-w-[160px]">
-                  {activeUser?.name || pSouth.name}
-                </span>
-                <span className="text-[8px] sm:text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-emerald-700 text-emerald-100 uppercase tracking-wider border border-emerald-500/50">
-                  Tú (Sur)
-                </span>
-              </div>
-              <div className="text-[10px] text-stone-400 font-mono">
-                Pareja de {pNorth?.name || 'Norte'}
-              </div>
-            </div>
+            {onSetHumanGaze && (
+              <>
+                <span className="text-[10px] font-mono font-black text-sky-300">👀 Mirar a:</span>
+                {([3, 2, 1, -1] as GazeTarget[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => onSetHumanGaze(t)}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition cursor-pointer ${
+                      humanGaze === t
+                        ? 'bg-sky-500 text-stone-950 border-sky-300'
+                        : 'bg-stone-900 text-stone-300 border-stone-700 hover:border-sky-400'
+                    }`}
+                  >
+                    {t === -1
+                      ? '🃏 Mis cartas'
+                      : t === 2
+                      ? `🤝 ${players[2]?.name || 'Norte'}`
+                      : `${t === 3 ? '⬅️' : '➡️'} ${players[t]?.name || SEAT_NAMES[t]}`}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
-        )}
 
-        {/* YOUR EYES & SEÑAS: choose where you look and pass señas when nobody is watching */}
-        {pSouth && onSetHumanGaze && (
-          <div className="mb-1 flex flex-col items-center gap-1 max-w-full px-2">
-            <div className="flex flex-wrap items-center justify-center gap-1 bg-stone-950/90 border border-sky-600/60 rounded-full px-2 py-1 shadow-lg">
-              <span className="text-[10px] font-mono font-black text-sky-300 mr-0.5">👀 Mirar a:</span>
-              {([3, 2, 1, -1] as GazeTarget[]).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => onSetHumanGaze(t)}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition cursor-pointer ${
-                    humanGaze === t
-                      ? 'bg-sky-500 text-stone-950 border-sky-300'
-                      : 'bg-stone-900 text-stone-300 border-stone-700 hover:border-sky-400'
-                  }`}
-                >
-                  {t === -1 ? '🃏 Mis cartas' : t === 2 ? `🤝 ${players[2]?.name || 'Norte'}` : `${t === 3 ? '⬅️' : '➡️'} ${players[t]?.name || SEAT_NAMES[t]}`}
-                </button>
-              ))}
-            </div>
-
-            {(() => {
+          {onSetHumanGaze &&
+            (() => {
               const watchers = [1, 3].filter((s) => gazes[s] === 0);
               const partnerLooking = gazes[2] === 0;
               return (
-                <div className="flex flex-wrap items-center justify-center gap-1 bg-stone-950/90 border border-amber-600/60 rounded-2xl px-2 py-1 shadow-lg">
+                <div className="flex flex-wrap items-center justify-center gap-1 bg-stone-950/90 border border-amber-600/60 rounded-2xl px-2 py-1 shadow-lg max-w-full">
                   <span
                     className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
                       partnerLooking ? 'bg-emerald-600 text-white' : 'bg-stone-800 text-stone-400'
@@ -479,33 +547,22 @@ export const Table: React.FC<TableProps> = ({
               );
             })()}
 
-            {((intelYourTeam[0] || []).length > 0 || (intelRivals[0] || []).length > 0) && (
-              <div className="flex flex-wrap justify-center gap-1">
-                {(intelYourTeam[0] || []).length > 0 && (
-                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-900/90 text-emerald-200 border border-emerald-500/60">
-                    🤝 Tu compañero sabe: {(intelYourTeam[0] || []).map(señaShortLabel).join(' · ')}
-                  </span>
-                )}
-                {(intelRivals[0] || []).length > 0 && (
-                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-rose-950/90 text-rose-200 border border-rose-500/60">
-                    ⚠️ Los rivales saben: {(intelRivals[0] || []).map(señaShortLabel).join(' · ')}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 4 Player Cards with authentic Spanish Figures (Sota, Caballo, Rey) and Faros */}
-        {pSouth && (
-          <CartoonPlayerHands
-            cards={pSouth.cards}
-            selectedIndices={pSouth.selectedToDiscard}
-            isDiscardPhase={isDiscardPhase}
-            onCardClick={onCardClick}
-          />
-        )}
-      </div>
+          {((intelYourTeam[0] || []).length > 0 || (intelRivals[0] || []).length > 0) && (
+            <div className="flex flex-wrap justify-center gap-1">
+              {(intelYourTeam[0] || []).length > 0 && (
+                <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-900/90 text-emerald-200 border border-emerald-500/60">
+                  🤝 Tu compañero sabe: {(intelYourTeam[0] || []).map(señaShortLabel).join(' · ')}
+                </span>
+              )}
+              {(intelRivals[0] || []).length > 0 && (
+                <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-rose-950/90 text-rose-200 border border-rose-500/60">
+                  ⚠️ Los rivales saben: {(intelRivals[0] || []).map(señaShortLabel).join(' · ')}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

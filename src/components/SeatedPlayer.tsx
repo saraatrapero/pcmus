@@ -1,6 +1,5 @@
 import React from 'react';
 import { Player } from '../types';
-import { FournierCard } from './FournierCard';
 import { CharacterAvatar } from './CharacterAvatar';
 import { GazeTarget, SEAT_NAMES, señaShortLabel } from '../gazeSystem';
 
@@ -45,7 +44,6 @@ interface SeatedPlayerProps {
   seatPosition: 'north' | 'east' | 'west';
   seatIndex: number;
   isMano: boolean;
-  showAllCards?: boolean;
   gaze?: GazeTarget;
   isWatchedByYou?: boolean;
   knownByYourTeam?: string[]; // señas of this player your team knows
@@ -54,12 +52,14 @@ interface SeatedPlayerProps {
   headRef?: (el: HTMLDivElement | null) => void;
 }
 
+// A character sitting at the table: head (turns its neck), neck, shoulders and arms resting
+// towards the table. Cards are drawn on the table itself, and every text label stays
+// outside the felt so nothing covers the game.
 export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
   player,
   seatPosition,
   seatIndex,
   isMano,
-  showAllCards = false,
   gaze = -1,
   isWatchedByYou = false,
   knownByYourTeam = [],
@@ -70,186 +70,152 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
   const isPartner = player.team === 0;
   const isLookingAtYou = gaze === 0;
 
-  const seatLabel = {
-    north: 'Norte (Compañero)',
-    west: 'Oeste (Rival)',
-    east: 'Este (Rival)',
-  }[seatPosition];
-
   const gazeLabel =
     gaze === -1
       ? 'Mira sus cartas'
       : gaze === 0
-      ? '¡Te está mirando!'
-      : `Mira a ${gaze === 2 ? 'tu compañero' : SEAT_NAMES[gaze]}`;
+      ? '¡Te mira!'
+      : `Mira a ${gaze === 2 ? 'tu pareja' : SEAT_NAMES[gaze]}`;
 
   const torsoColor = player.avatarColor?.startsWith('from-')
     ? `bg-gradient-to-b ${player.avatarColor}`
     : player.avatarColor || 'bg-stone-700';
 
+  // Arms reach towards the table: down for North, to the right for West, to the left for East
+  const armStyle = {
+    north: { left: 'rotate-[18deg]', right: '-rotate-[18deg]' },
+    west: { left: 'rotate-[8deg]', right: '-rotate-[48deg]' },
+    east: { left: 'rotate-[48deg]', right: '-rotate-[8deg]' },
+  }[seatPosition];
+
+  const nameplate = (
+    <div
+      className={`flex flex-col items-center bg-stone-950/90 border px-1.5 py-0.5 rounded-lg shadow-lg max-w-[82px] sm:max-w-[150px] ${
+        isWatchedByYou ? 'border-sky-400' : 'border-stone-700'
+      }`}
+    >
+      <div className="flex items-center gap-1 max-w-full">
+        <span
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${isPartner ? 'bg-emerald-400' : 'bg-rose-400'}`}
+          title={isPartner ? 'Tu pareja' : 'Rival'}
+        />
+        <span className="font-serif font-black text-[10px] sm:text-xs text-amber-200 truncate">
+          {player.name}
+        </span>
+      </div>
+      <div
+        className={`text-[8px] sm:text-[9px] font-mono font-bold truncate max-w-full ${
+          isLookingAtYou ? 'text-rose-400' : gaze === -1 ? 'text-stone-500' : 'text-stone-300'
+        }`}
+      >
+        {gazeArrow(seatIndex, gaze)} {gazeLabel}
+      </div>
+      {knownByYourTeam.length > 0 && (
+        <div
+          className={`mt-0.5 text-[8px] sm:text-[9px] font-mono font-black px-1 rounded-full border max-w-full truncate ${
+            isPartner
+              ? 'bg-emerald-900/80 text-emerald-200 border-emerald-500/60'
+              : 'bg-sky-900/80 text-sky-200 border-sky-500/60'
+          }`}
+          title={isPartner ? 'Señas recibidas de tu compañero' : 'Señas que tu equipo ha cazado a este rival'}
+        >
+          {isPartner ? '🤝 ' : '🕵️ '}
+          {knownByYourTeam.map(señaShortLabel).join(' · ')}
+        </div>
+      )}
+      {knowsYourSeñas.length > 0 && (
+        <div
+          className="mt-0.5 text-[8px] sm:text-[9px] font-mono font-black px-1 rounded-full border bg-rose-950/80 text-rose-200 border-rose-500/60 max-w-full truncate"
+          title="Este rival ha visto tus señas: conoce tus cartas"
+        >
+          ⚠️ Sabe: {knowsYourSeñas.map(señaShortLabel).join(' · ')}
+        </div>
+      )}
+    </div>
+  );
+
+  const figure = (
+    <div className="relative flex flex-col items-center">
+      {/* Head */}
+      <div
+        ref={headRef}
+        className="relative z-20 transition-transform duration-500 ease-out will-change-transform"
+        style={{ transform: getHeadTransform(seatIndex, gaze), transformStyle: 'preserve-3d' }}
+      >
+        <CharacterAvatar
+          characterId={player.id}
+          characterName={player.name}
+          size="md"
+          isSpeaking={!!player.currentSpeech}
+          className={`rounded-2xl ${
+            isLookingAtYou
+              ? 'ring-4 ring-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.8)]'
+              : isWatchedByYou
+              ? 'ring-4 ring-sky-400'
+              : 'ring-2 ring-stone-900'
+          }`}
+        />
+        {isMano && (
+          <span
+            className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-[10px] flex items-center justify-center shadow-lg border-2 border-stone-950 z-30"
+            title="Mano de la ronda de Mus"
+          >
+            M
+          </span>
+        )}
+        {/* Gaze direction marker */}
+        <span
+          className={`absolute -top-2 -right-3 text-[11px] leading-none px-1 py-0.5 rounded-full border border-stone-950 shadow z-30 ${
+            isLookingAtYou ? 'bg-rose-500 animate-pulse' : 'bg-stone-100'
+          }`}
+          title={gazeLabel}
+        >
+          {isLookingAtYou ? '👁️' : gazeArrow(seatIndex, gaze)}
+        </span>
+        {/* Seña gesture: just the face emoji, the explanation goes to the top ticker */}
+        {player.lastGesture && (
+          <span
+            className="absolute -bottom-2 -right-3 z-40 text-lg leading-none bg-amber-400 rounded-full border-2 border-stone-950 px-0.5 shadow-lg animate-bounce"
+            title={player.lastGesture}
+          >
+            {player.lastGesture.split(' ')[0]}
+          </span>
+        )}
+      </div>
+
+      {/* Neck */}
+      <div className="w-4 h-2 -mt-0.5 bg-gradient-to-b from-[#e8b98a] to-[#c98f5e] border-x border-stone-900/50 z-10" />
+
+      {/* Shoulders & torso */}
+      <div
+        className={`relative -mt-0.5 w-16 sm:w-28 h-9 sm:h-12 rounded-t-[44px] border-2 border-stone-950 shadow-[inset_0_-8px_12px_rgba(0,0,0,0.5),0_8px_14px_rgba(0,0,0,0.55)] ${torsoColor}`}
+      >
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[11px] border-l-transparent border-r-transparent border-t-white/80" />
+        <div className={`absolute -left-1 bottom-0 w-4 sm:w-5 h-8 sm:h-9 rounded-full bg-black/25 border border-stone-950/70 origin-bottom ${armStyle.left}`} />
+        <div className={`absolute -right-1 bottom-0 w-4 sm:w-5 h-8 sm:h-9 rounded-full bg-black/25 border border-stone-950/70 origin-bottom ${armStyle.right}`} />
+      </div>
+    </div>
+  );
+
   return (
     <div
-      className={`relative flex flex-col items-center select-none z-20 ${onWatch ? 'cursor-pointer' : ''}`}
+      className={`relative flex items-center select-none z-20 ${onWatch ? 'cursor-pointer' : ''} ${
+        seatPosition === 'north' ? 'flex-row gap-2' : 'flex-col gap-1'
+      }`}
       onClick={onWatch}
       title={onWatch ? `Mirar a ${player.name} (para recibir o cazar señas)` : undefined}
     >
-      {/* Gesture bubble: only rendered when your team actually saw the seña */}
-      {player.lastGesture && (
-        <div
-          className={`absolute top-0 z-40 w-max max-w-[170px] text-center bg-amber-400 text-stone-950 text-[10px] sm:text-xs font-mono font-black px-2 py-1 rounded-xl border-2 border-stone-950 shadow-lg animate-bounce ${
-            seatPosition === 'north'
-              ? 'right-full mr-2'
-              : seatPosition === 'west'
-              ? 'left-1/2 -translate-y-full'
-              : 'right-1/2 -translate-y-full'
-          }`}
-        >
-          🤫 {player.lastGesture}
-        </div>
+      {seatPosition === 'north' ? (
+        <>
+          {nameplate}
+          {figure}
+        </>
+      ) : (
+        <>
+          {figure}
+          {nameplate}
+        </>
       )}
-
-      {/* Speech bubble */}
-      {player.currentSpeech && (
-        <div
-          className={`absolute z-40 w-max max-w-[160px] bg-white text-stone-900 text-[10px] font-bold px-2 py-1 rounded-xl border-2 border-stone-900 shadow-lg pointer-events-none ${
-            seatPosition === 'north'
-              ? 'left-full ml-2 top-2'
-              : seatPosition === 'west'
-              ? 'left-full ml-1 top-0'
-              : 'right-full mr-1 top-0'
-          }`}
-        >
-          {player.currentSpeech}
-        </div>
-      )}
-
-      {/* 1. SEATED FIGURE: head (turns its neck) + neck + torso + arms holding the cards */}
-      <div className="relative flex flex-col items-center">
-        {/* Head */}
-        <div
-          ref={headRef}
-          className="relative z-20 transition-transform duration-500 ease-out will-change-transform"
-          style={{ transform: getHeadTransform(seatIndex, gaze), transformStyle: 'preserve-3d' }}
-        >
-          <CharacterAvatar
-            characterId={player.id}
-            characterName={player.name}
-            size="md"
-            isSpeaking={!!player.currentSpeech}
-            className={`rounded-2xl ${
-              isLookingAtYou
-                ? 'ring-4 ring-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.8)]'
-                : isWatchedByYou
-                ? 'ring-4 ring-sky-400'
-                : 'ring-2 ring-stone-900'
-            }`}
-          />
-          {isMano && (
-            <span
-              className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-xs flex items-center justify-center shadow-lg border-2 border-stone-950 z-30 animate-bounce"
-              title="Mano de la ronda de Mus"
-            >
-              M
-            </span>
-          )}
-          {/* Gaze direction marker */}
-          <span
-            className={`absolute -top-2 -right-3 text-[11px] leading-none px-1 py-0.5 rounded-full border border-stone-950 shadow z-30 ${
-              isLookingAtYou ? 'bg-rose-500 animate-pulse' : 'bg-stone-100'
-            }`}
-            title={gazeLabel}
-          >
-            {isLookingAtYou ? '👁️' : gazeArrow(seatIndex, gaze)}
-          </span>
-        </div>
-
-        {/* Neck */}
-        <div className="w-4 h-2 -mt-0.5 bg-gradient-to-b from-amber-200 to-amber-400 border-x border-stone-900/60 z-10" />
-
-        {/* Torso with shoulders */}
-        <div
-          className={`relative -mt-0.5 w-20 sm:w-32 h-10 sm:h-12 rounded-t-[44px] border-2 border-stone-950 shadow-[inset_0_-6px_10px_rgba(0,0,0,0.45)] ${torsoColor}`}
-        >
-          {/* Shirt collar */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[9px] border-r-[9px] border-t-[12px] border-l-transparent border-r-transparent border-t-white/80" />
-          {/* Arms reaching for the cards */}
-          <div className="absolute -left-1 bottom-0 w-5 h-9 rounded-full bg-black/25 border border-stone-950/70 rotate-[24deg] origin-bottom" />
-          <div className="absolute -right-1 bottom-0 w-5 h-9 rounded-full bg-black/25 border border-stone-950/70 -rotate-[24deg] origin-bottom" />
-        </div>
-
-        {/* Cards held over the edge of the table */}
-        <div className="relative z-30 -mt-6 flex items-center justify-center -space-x-7 sm:-space-x-4">
-          {player.cards.map((card, idx) => {
-            const rot = [-8, -3, 3, 8][idx] || 0;
-            return (
-              <div
-                key={card.id || idx}
-                style={{ transform: `rotate(${rot}deg)`, transformOrigin: 'bottom center' }}
-                className="transition-transform hover:-translate-y-2 hover:z-20"
-              >
-                <FournierCard
-                  card={card}
-                  hidden={!showAllCards}
-                  size="sm"
-                  className="shadow-[0_4px_12px_rgba(0,0,0,0.7)] border-2 border-stone-950"
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 2. NAMEPLATE */}
-      <div
-        className={`mt-1 flex flex-col items-center bg-stone-950/95 border-2 px-2 py-1 rounded-xl shadow-xl transition ${
-          isWatchedByYou ? 'border-sky-400' : 'border-stone-800 hover:border-amber-500/80'
-        }`}
-      >
-        <div className="flex items-center gap-1.5">
-          <span className="font-serif font-black text-xs sm:text-sm text-amber-200 truncate max-w-[100px] sm:max-w-[130px]">
-            {player.name}
-          </span>
-          <span
-            className={`text-[8px] font-mono font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
-              isPartner
-                ? 'bg-emerald-700 text-emerald-100 border border-emerald-500/50'
-                : 'bg-rose-800 text-rose-100 border border-rose-600/50'
-            }`}
-          >
-            {isPartner ? 'Pareja' : 'Rival'}
-          </span>
-        </div>
-        <div className="text-[9px] text-stone-400 font-mono">{seatLabel}</div>
-        <div
-          className={`text-[9px] font-mono font-bold ${
-            isLookingAtYou ? 'text-rose-400' : gaze === -1 ? 'text-stone-500' : 'text-stone-300'
-          }`}
-        >
-          {gazeArrow(seatIndex, gaze)} {gazeLabel}
-        </div>
-
-        {knownByYourTeam.length > 0 && (
-          <div
-            className={`mt-0.5 text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full border ${
-              isPartner
-                ? 'bg-emerald-900/80 text-emerald-200 border-emerald-500/60'
-                : 'bg-sky-900/80 text-sky-200 border-sky-500/60'
-            }`}
-            title={isPartner ? 'Señas recibidas de tu compañero' : 'Señas que tu equipo ha cazado a este rival'}
-          >
-            {isPartner ? '🤝 Te dice: ' : '🕵️ Cazado: '}
-            {knownByYourTeam.map(señaShortLabel).join(' · ')}
-          </div>
-        )}
-        {knowsYourSeñas.length > 0 && (
-          <div
-            className="mt-0.5 text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full border bg-rose-950/80 text-rose-200 border-rose-500/60"
-            title="Este rival ha visto tus señas: conoce tus cartas"
-          >
-            ⚠️ Sabe tu {knowsYourSeñas.map(señaShortLabel).join(' · ')}
-          </div>
-        )}
-      </div>
     </div>
   );
 };
