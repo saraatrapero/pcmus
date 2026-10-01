@@ -82,6 +82,47 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
             <span>{seatLabel}</span>
           </div>
 
+          {/* Declaración oficial de Pares y Juego de este jugador */}
+          <div className="flex items-center gap-1 mt-1 font-mono text-[9px] font-black">
+            <span
+              className={`px-1.5 py-0.5 rounded border transition-colors ${
+                player.declaredPares === true
+                  ? 'bg-emerald-950 text-emerald-300 border-emerald-500 shadow-xs'
+                  : player.declaredPares === false
+                  ? 'bg-stone-900 text-stone-400 border-stone-800'
+                  : 'bg-stone-950/60 text-stone-500 border-stone-800/60'
+              }`}
+              title={
+                player.declaredPares === true
+                  ? `${player.name} TIENE Pares (participa en el lance)`
+                  : player.declaredPares === false
+                  ? `${player.name} NO TIENE Pares (no puede intervenir)`
+                  : 'Pares aún no consultados'
+              }
+            >
+              {player.declaredPares === true ? 'Pares: SÍ' : player.declaredPares === false ? 'Pares: NO' : 'Pares: ?'}
+            </span>
+
+            <span
+              className={`px-1.5 py-0.5 rounded border transition-colors ${
+                player.declaredJuego === true
+                  ? 'bg-amber-950 text-amber-300 border-amber-500 shadow-xs'
+                  : player.declaredJuego === false
+                  ? 'bg-stone-900 text-stone-400 border-stone-800'
+                  : 'bg-stone-950/60 text-stone-500 border-stone-800/60'
+              }`}
+              title={
+                player.declaredJuego === true
+                  ? `${player.name} TIENE Juego (>=31, participa en el lance)`
+                  : player.declaredJuego === false
+                  ? `${player.name} NO TIENE Juego (<31)`
+                  : 'Juego aún no consultado'
+              }
+            >
+              {player.declaredJuego === true ? 'Juego: SÍ' : player.declaredJuego === false ? 'Juego: NO' : 'Juego: ?'}
+            </span>
+          </div>
+
           {/* Seña / Gesture Badge if active */}
           {player.lastGesture && (
             <div className="mt-0.5">
@@ -94,6 +135,18 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
             </div>
           )}
         </div>
+
+        {/* Dynamic Speech Bubble for AI dialogues & announcements */}
+        {player.currentSpeech && (
+          <div
+            className={`absolute ${speechBubblePlacement} z-40 bg-amber-100 text-stone-950 border-2 border-stone-950 px-2.5 py-1 rounded-xl shadow-xl font-sans text-xs font-bold whitespace-nowrap animate-bounce`}
+          >
+            <span className="text-[10px] text-amber-800 font-mono block -mb-0.5 font-bold uppercase">
+              {player.name}:
+            </span>
+            <span>«{player.currentSpeech}»</span>
+          </div>
+        )}
       </div>
 
       {/* 3. FOUR SPANISH CARDS (100% visible, unobstructed, clean fanning with authentic figures) */}

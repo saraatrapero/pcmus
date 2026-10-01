@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card } from '../types';
 import { FournierCard } from './FournierCard';
-import { getHandSum, evaluatePares, getCardSumValue } from '../musLogic';
+import { describeParesHand, describeJuegoHand, getCardSumValue } from '../musLogic';
 
 interface CartoonPlayerHandsProps {
   cards: Card[];
@@ -17,17 +17,8 @@ export const CartoonPlayerHands: React.FC<CartoonPlayerHandsProps> = ({
   onCardClick,
 }) => {
   // Hand numerical statistics (Punto / Juego y Pares)
-  const handSum = cards.length === 4 ? getHandSum(cards) : 0;
-  const paresEval = cards.length === 4 ? evaluatePares(cards) : null;
-  const hasJuego = handSum >= 31;
-  const hasPares = !!paresEval && paresEval.type !== 'none';
-
-  const getParesLabel = () => {
-    if (!paresEval || paresEval.type === 'none') return 'Sin Pares';
-    if (paresEval.type === 'duples') return '¡Duples!';
-    if (paresEval.type === 'medias') return '¡Medias!';
-    return 'Pareja';
-  };
+  const paresInfo = cards.length === 4 ? describeParesHand(cards) : null;
+  const juegoInfo = cards.length === 4 ? describeJuegoHand(cards) : null;
 
   return (
     <div className="relative flex flex-col items-center select-none pt-1 pb-1">
@@ -63,27 +54,40 @@ export const CartoonPlayerHands: React.FC<CartoonPlayerHandsProps> = ({
         })}
       </div>
 
-      {/* DISCREET NUMERICAL HAND SUMMARY (Clean, unobtrusive, placed below cards) */}
-      {cards.length === 4 && (
-        <div className="mt-1 flex items-center gap-2 bg-stone-950/85 border border-amber-500/60 px-3 py-0.5 rounded-full shadow-lg text-stone-200 text-[10px] sm:text-xs font-mono">
-          <span className="text-amber-400 font-bold">Mano:</span>
-          <span className="font-black text-amber-200">
-            {cards.map((c) => getCardSumValue(c.number)).join('+')} =
-          </span>
-          <span
-            className={`font-black px-1.5 py-0.2 rounded ${
-              hasJuego
-                ? 'bg-amber-500 text-stone-950 shadow-sm'
-                : 'bg-stone-800 text-amber-300'
+      {/* ASESOR VISUAL CLARO DE TU MANO (Pares y Juego explícitos) */}
+      {cards.length === 4 && paresInfo && juegoInfo && (
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5 max-w-lg mx-auto">
+          {/* PARES PILL */}
+          <div
+            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] sm:text-xs font-mono font-bold shadow transition ${
+              paresInfo.hasPares
+                ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200 ring-1 ring-emerald-500/50'
+                : 'bg-stone-900/90 border-stone-700 text-stone-400'
             }`}
+            title={paresInfo.detail}
           >
-            {hasJuego ? `Juego ${handSum}` : `Punto ${handSum}`}
-          </span>
-          {hasPares && (
-            <span className="bg-emerald-800 text-emerald-100 font-bold px-1.5 py-0.2 rounded">
-              {getParesLabel()}
+            <span>{paresInfo.hasPares ? '✅' : '❌'}</span>
+            <span className="font-black text-amber-300">Pares:</span>
+            <span>{paresInfo.hasPares ? paresInfo.detail : 'Sin Pares'}</span>
+          </div>
+
+          {/* JUEGO PILL */}
+          <div
+            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] sm:text-xs font-mono font-bold shadow transition ${
+              juegoInfo.hasJuego
+                ? 'bg-amber-950/90 border-amber-500 text-amber-200 ring-1 ring-amber-500/50'
+                : 'bg-stone-900/90 border-stone-700 text-stone-400'
+            }`}
+            title={juegoInfo.detail}
+          >
+            <span>{juegoInfo.hasJuego ? '✅' : '❌'}</span>
+            <span className="font-black text-amber-300">Juego (&ge;31):</span>
+            <span>
+              {juegoInfo.hasJuego
+                ? `SÍ (${juegoInfo.sum})`
+                : `NO (Punto: ${juegoInfo.sum})`}
             </span>
-          )}
+          </div>
         </div>
       )}
     </div>

@@ -58,7 +58,9 @@ export interface Player {
   currentSpeech?: string | null;
   lastGesture?: string | null;
   hasPares?: boolean;
+  declaredPares?: boolean | null; // true: Sí, false: No, null: sin declarar
   hasJuego?: boolean;
+  declaredJuego?: boolean | null; // true: Sí, false: No, null: sin declarar
   juegoValue?: number;
 }
 

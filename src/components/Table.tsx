@@ -22,6 +22,7 @@ interface TableProps {
   activeUser?: UserProfile;
   gameSpeed?: 'tranquilo' | 'normal' | 'rapido';
   onChangeGameSpeed?: () => void;
+  controlsNode?: React.ReactNode;
 }
 
 export const Table: React.FC<TableProps> = ({
@@ -40,6 +41,7 @@ export const Table: React.FC<TableProps> = ({
   activeUser,
   gameSpeed = 'tranquilo',
   onChangeGameSpeed,
+  controlsNode,
 }) => {
   const isDiscardPhase = phase === 'discarding';
   const pSouth = players[0];
@@ -53,24 +55,118 @@ export const Table: React.FC<TableProps> = ({
   // Active dialogue across any player
   const activeSpeakingPlayer = players.find((p) => !!p.currentSpeech);
 
-  // Realistic 3D Garbanzo / Amarraco element with stamped numerical value
-  const renderGarbanzo = (key: string | number, isAmarraco: boolean = false, className: string = '') => (
-    <div
-      key={key}
-      className={`rounded-full border border-stone-950 shadow-[1px_2px_4px_rgba(0,0,0,0.6)] relative inline-flex items-center justify-center font-mono font-black select-none ${
-        isAmarraco
-          ? 'w-4 h-4 sm:w-5 sm:h-5 bg-gradient-to-br from-yellow-300 via-amber-500 to-amber-800 text-stone-950 text-[9px]'
-          : 'w-3.5 h-3.5 sm:w-4 sm:h-4 bg-gradient-to-br from-amber-100 via-amber-300 to-amber-700 text-stone-900 text-[8px]'
-      } ${className}`}
-      title={isAmarraco ? 'Amarraco (Valor: 5 piedras)' : 'Piedra (Valor: 1 piedra)'}
-    >
-      <span className="leading-none">{isAmarraco ? '5' : '1'}</span>
-      <div className="absolute top-0.5 left-0.5 w-1 h-1 rounded-full bg-white opacity-80 pointer-events-none" />
-    </div>
-  );
+  const team0Piedras = scoreTeam0?.piedras || 0;
+  const team1Piedras = scoreTeam1?.piedras || 0;
+  const target = targetPiedras || 40;
+
+  // Realistic Platillo de Piedras / Tanteo Tray sitting directly on the table felt
+  const renderPlatillo = (
+    teamName: string,
+    isUserTeam: boolean,
+    piedras: number,
+    targetVal: number
+  ) => {
+    const amarracos = Math.floor(piedras / 5);
+    const sueltas = piedras % 5;
+
+    return (
+      <div
+        className={`rounded-2xl border-2 p-2 sm:p-2.5 flex flex-col items-center justify-between shadow-2xl backdrop-blur-xs select-none transition-all duration-300 w-[125px] sm:w-[155px] shrink-0 z-20 ${
+          isUserTeam
+            ? 'bg-gradient-to-b from-[#2a1708]/95 via-[#1c0f04]/95 to-[#120a02]/95 border-emerald-500/80 shadow-[0_8px_20px_rgba(0,0,0,0.85),inset_0_2px_8px_rgba(16,185,129,0.3)]'
+            : 'bg-gradient-to-b from-[#2a1708]/95 via-[#1c0f04]/95 to-[#120a02]/95 border-rose-500/80 shadow-[0_8px_20px_rgba(0,0,0,0.85),inset_0_2px_8px_rgba(244,63,94,0.3)]'
+        }`}
+        title={`Platillo de piedras en la mesa - ${teamName}: ${piedras} de ${targetVal} piedras`}
+      >
+        {/* Header with team tag & stones tally */}
+        <div className="w-full flex items-center justify-between gap-1 pb-1 border-b border-amber-900/60 font-mono text-[9px] sm:text-[10px]">
+          <span
+            className={`font-black uppercase tracking-wider flex items-center gap-1 ${
+              isUserTeam ? 'text-emerald-400' : 'text-rose-400'
+            }`}
+          >
+            <span>{isUserTeam ? '🟢' : '🔴'}</span>
+            <span className="truncate max-w-[70px] sm:max-w-[95px]">{teamName}</span>
+          </span>
+          <span className="font-mono font-black text-amber-300 text-xs sm:text-sm bg-black/75 px-1.5 py-0.2 rounded border border-amber-500/40 shadow-xs">
+            {piedras}
+            <span className="text-[8.5px] text-stone-400 font-normal">/{targetVal}</span>
+          </span>
+        </div>
+
+        {/* Dish Basin with tactile 3D Chips / Stones */}
+        <div className="w-full my-1 py-1 px-1 rounded-xl bg-gradient-to-b from-[#081e0f] via-[#0a2613] to-[#041208] border border-emerald-900/70 shadow-inner flex flex-col items-center justify-center min-h-[46px] gap-1">
+          <div className="flex items-center gap-1.5 flex-wrap justify-center">
+            {/* Amarracos (Fichas doradas metálicas = 5 piedras cada una) */}
+            {amarracos > 0 && (
+              <div
+                className="flex items-center gap-0.5"
+                title={`${amarracos} amarraco(s) = ${amarracos * 5} piedras`}
+              >
+                <span className="text-[9px] font-mono font-black text-amber-300">
+                  {amarracos}x
+                </span>
+                <div className="flex items-center -space-x-1">
+                  {[...Array(Math.min(amarracos, 6))].map((_, i) => (
+                    <div
+                      key={`am_${i}`}
+                      className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-amber-700 border border-yellow-200 shadow-[1px_2px_4px_rgba(0,0,0,0.8)] relative flex items-center justify-center text-[9px] font-black text-stone-950 font-mono select-none"
+                    >
+                      <span>5</span>
+                      <div className="absolute top-0.5 left-0.5 w-1 h-1 rounded-full bg-white opacity-80 pointer-events-none" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Piedras sueltas (Fichas de hueso/marfil = 1 piedra cada una) */}
+            {sueltas > 0 && (
+              <div
+                className="flex items-center gap-0.5"
+                title={`${sueltas} piedra(s) suelta(s) = ${sueltas} piedras`}
+              >
+                <span className="text-[9px] font-mono font-black text-stone-300">
+                  {sueltas}x
+                </span>
+                <div className="flex items-center -space-x-1">
+                  {[...Array(sueltas)].map((_, i) => (
+                    <div
+                      key={`su_${i}`}
+                      className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-gradient-to-br from-stone-100 via-stone-300 to-stone-500 border border-white shadow-[1px_2px_4px_rgba(0,0,0,0.8)] relative flex items-center justify-center text-[8px] font-black text-stone-900 font-mono select-none"
+                    >
+                      <span>1</span>
+                      <div className="absolute top-0.5 left-0.5 w-0.5 h-0.5 rounded-full bg-white opacity-90 pointer-events-none" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {amarracos === 0 && sueltas === 0 && (
+              <span className="text-[8.5px] text-stone-500 font-mono italic">
+                0 piedras
+              </span>
+            )}
+          </div>
+
+          {/* Legend */}
+          <div className="text-[7.5px] sm:text-[8px] text-stone-400 font-mono flex items-center gap-1 leading-none">
+            <span className="text-amber-300 font-bold">
+              {amarracos} am.
+            </span>
+            <span>•</span>
+            <span className="text-stone-300 font-bold">
+              {sueltas} p.
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col justify-between min-h-[500px] sm:min-h-[540px]">
+    <div className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col justify-between flex-1 min-h-[560px] sm:min-h-[620px]">
       {/* 1. TAVERN BAR BACKGROUND (Clean wallpaper, no UI, no bottom settings/icons) */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <img
@@ -178,58 +274,267 @@ export const Table: React.FC<TableProps> = ({
           )}
         </div>
 
-        {/* OVAL WOODEN TABLE SURFACE */}
-        <div className="flex-1 mx-2 sm:mx-4 h-full min-h-[160px] sm:min-h-[180px] rounded-[100px] border-[5px] sm:border-[7px] border-[#381a06] bg-gradient-to-b from-[#d99f60] via-[#c68945] to-[#b06f2d] shadow-[inset_0_4px_25px_rgba(0,0,0,0.6),0_12px_24px_rgba(0,0,0,0.8)] relative p-3 flex flex-col items-center justify-between overflow-hidden">
-          {/* Wooden planks horizontal texture lines */}
-          <div
-            className="absolute inset-0 opacity-15 pointer-events-none"
-            style={{
-              backgroundImage: `repeating-linear-gradient(0deg, #261203 0px, #261203 2px, transparent 2px, transparent 36px)`,
-            }}
-          />
-
-          {/* TABLE OBJECT 1: DECK OF SPANISH CARDS (Taco de baraja sobre la mesa) */}
-          <div
-            className="absolute left-4 top-1/2 -translate-y-1/2 flex flex-col items-center z-10 hidden sm:flex"
-            title="Baraja Española de 40 naipes (Heraclio Fournier 1996)"
-          >
-            <div className="w-10 h-15 rounded-lg border-2 border-stone-950 bg-red-800 shadow-[3px_4px_8px_rgba(0,0,0,0.7)] relative overflow-hidden transform -rotate-12">
-              <div className="absolute inset-0.5 border border-amber-400/40 bg-gradient-to-br from-red-950 to-red-800 flex items-center justify-center">
-                <span className="text-[8px] font-mono font-black text-amber-300 opacity-90">
-                  40
-                </span>
-              </div>
-            </div>
-            <div className="w-9 h-1.5 bg-stone-900 rounded-b -mt-0.5 transform -rotate-12 shadow" />
+        {/* GRAND OVAL SPANISH TAVERN TABLE WITH TAPETE VERDE */}
+        <div className="flex-1 mx-1.5 sm:mx-3 h-full min-h-[190px] sm:min-h-[220px] rounded-[50px] sm:rounded-[80px] border-[6px] sm:border-[8px] border-[#381907] bg-gradient-to-b from-[#4a240d] via-[#2f1506] to-[#1a0a02] shadow-[inset_0_4px_30px_rgba(0,0,0,0.85),0_15px_30px_rgba(0,0,0,0.9)] relative p-2 sm:p-3 flex flex-col justify-between overflow-hidden">
+          {/* TAPETE VERDE DE PAÑO DE MUS (Traditional Green Baize Felt) */}
+          <div className="absolute inset-2 sm:inset-3 rounded-[40px] sm:rounded-[68px] border-2 border-amber-600/40 bg-gradient-to-b from-[#134e2b] via-[#155e34] to-[#0f3c21] shadow-[inset_0_3px_20px_rgba(0,0,0,0.7)] overflow-hidden pointer-events-none">
+            {/* Subtle felt baize weave */}
+            <div
+              className="absolute inset-0 opacity-10"
+              style={{
+                backgroundImage: `radial-gradient(circle at 50% 50%, #ffffff 1px, transparent 1px)`,
+                backgroundSize: '16px 16px',
+              }}
+            />
+            {/* Decorative gold stitched border line */}
+            <div className="absolute inset-1.5 rounded-[34px] sm:rounded-[62px] border border-amber-400/25 pointer-events-none" />
           </div>
 
-          {/* Center: Sleek Lance Status Placard (Crisp, high-contrast, centered) */}
-          <div className="my-auto z-20 flex flex-col items-center max-w-xs text-center">
-            {/* Lance Banner */}
-            <div className="bg-blue-900 border-2 border-yellow-400 px-4 py-1.5 rounded-xl shadow-lg text-yellow-300 font-mono font-black">
-              <div className="text-[9px] uppercase tracking-widest text-amber-200 leading-none">
-                LANCE ACTUAL
-              </div>
-              <div className="text-base sm:text-xl uppercase text-white font-serif font-black">
-                {currentLanceName}
+          {/* TABLE SURFACE CONTENT: SIDE CHIP TRAYS + CENTER LANCE & DECLARATIONS */}
+          <div className="relative z-10 w-full h-full flex flex-col md:flex-row items-center justify-between gap-1.5 sm:gap-2 my-auto px-1 sm:px-2">
+            {/* LEFT SIDE OF TABLE: Platillo de Piedras de Tu Pareja + Baraja */}
+            <div className="flex items-center gap-1.5 shrink-0 justify-center">
+              {renderPlatillo('Tu Pareja', true, team0Piedras, target)}
+
+              {/* Taco de Baraja Española Fournier 1996 sobre el tapete verde */}
+              <div
+                className="hidden lg:flex flex-col items-center select-none"
+                title="Baraja Española Fournier 1996 (40 naipes) sobre el tapete verde"
+              >
+                <div className="w-9 h-14 rounded-lg border-2 border-stone-950 bg-red-900 shadow-[3px_4px_8px_rgba(0,0,0,0.75)] relative overflow-hidden transform -rotate-6">
+                  <div className="absolute inset-0.5 border border-amber-400/50 bg-gradient-to-br from-red-950 via-red-900 to-red-800 flex items-center justify-center">
+                    <span className="text-[7.5px] font-mono font-black text-amber-300">
+                      40
+                    </span>
+                  </div>
+                </div>
+                <div className="w-8 h-1 bg-stone-900 rounded-b -mt-0.5 transform -rotate-6 shadow" />
+                <span className="text-[7.5px] font-mono font-bold text-amber-200/80 mt-0.5">
+                  Baraja
+                </span>
               </div>
             </div>
 
-            {/* Active Bet Indicator */}
-            {betState.currentBet > 0 && (
-              <div className="mt-1 bg-amber-400 text-stone-950 px-3 py-0.5 rounded-full border-2 border-stone-950 font-mono font-black text-xs shadow flex items-center gap-1.5">
-                <span>
-                  {betState.isOrdago
-                    ? '🔥 ¡ÓRDAGO VIVO!'
-                    : `🪙 APUESTA: ${betState.currentBet} PIEDRAS`}
+            {/* CENTER OF TABLE: Lance Placard, Active Bet Pot & Declarations Panel */}
+            <div className="flex-1 flex flex-col items-center max-w-sm sm:max-w-md text-center w-full px-1 z-20">
+              {/* Lance Banner */}
+              <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 border-2 border-yellow-400 px-3 py-1 rounded-xl shadow-xl text-yellow-300 font-mono font-black flex items-center gap-2">
+                <span className="text-[9px] uppercase tracking-widest text-amber-200 leading-none">
+                  LANCE:
                 </span>
-                {betState.accepted && (
-                  <span className="bg-emerald-700 text-white text-[8px] px-1.5 py-0.2 rounded uppercase">
-                    Quiero
-                  </span>
-                )}
+                <span className="text-xs sm:text-base uppercase text-white font-serif font-black">
+                  {currentLanceName}
+                </span>
               </div>
-            )}
+
+              {/* Active Bet Pot / Chips in Litigation on the Center of the Table */}
+              {betState.currentBet > 0 && (
+                <div className="mt-1 bg-amber-400 text-stone-950 px-2.5 py-0.5 rounded-full border-2 border-stone-950 font-mono font-black text-xs shadow-lg flex items-center gap-1.5 animate-bounce">
+                  <span>
+                    {betState.isOrdago
+                      ? '🔥 ¡ÓRDAGO EN LITIGIO!'
+                      : `🪙 BOTE EN JUEGO: ${betState.currentBet} PIEDRAS`}
+                  </span>
+                  {betState.accepted && (
+                    <span className="bg-emerald-800 text-white text-[8px] px-1.5 py-0.2 rounded uppercase">
+                      Quiero
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Panel de Declaraciones Oficiales (Pares y Juego) - Visible a todos */}
+              <div className="mt-1 w-full bg-stone-950/95 border border-amber-600/70 rounded-xl p-1.5 shadow-xl backdrop-blur-xs text-[10px] font-mono">
+                <div className="flex items-center justify-between pb-0.5 border-b border-stone-800 text-[8.5px] sm:text-[9px] uppercase tracking-wider text-amber-300 font-bold">
+                  <span className="flex items-center gap-1">
+                    <span>📋</span>
+                    <span>Declaraciones Oficiales</span>
+                  </span>
+                  <span className="text-[7.5px] sm:text-[8px] text-stone-400 font-normal">
+                    {phase === 'pares_precheck' || phase === 'pares_bet'
+                      ? '• en lance de pares'
+                      : phase === 'juego_precheck' || phase === 'juego_bet'
+                      ? '• en lance de juego'
+                      : '• mesa completa'}
+                  </span>
+                </div>
+
+                {/* PARES ROW */}
+                <div
+                  className={`mt-1 p-0.5 rounded transition-colors ${
+                    phase === 'pares_precheck' || phase === 'pares_bet'
+                      ? 'bg-amber-950/80 border border-amber-500/80 shadow-xs'
+                      : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[8px] font-bold text-stone-300 mb-0.5 px-0.5">
+                    <span className="flex items-center gap-1">
+                      <span className="text-amber-400">🃏</span>
+                      <span>PARES:</span>
+                    </span>
+                    <span className="text-[7.5px] text-stone-400 font-mono">
+                      {pSouth?.declaredPares === null && pNorth?.declaredPares === null
+                        ? 'Esperando consulta'
+                        : 'Certificado oficial'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-[8.5px]">
+                    {/* Tu Pareja */}
+                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
+                      <span className="text-emerald-400 font-bold truncate max-w-[55px]">
+                        Pareja
+                      </span>
+                      <span className="flex items-center gap-1 font-black">
+                        <span
+                          className={
+                            pSouth?.declaredPares
+                              ? 'text-emerald-300'
+                              : pSouth?.declaredPares === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Tú:{pSouth?.declaredPares ? 'SÍ' : pSouth?.declaredPares === false ? 'NO' : '?'}
+                        </span>
+                        <span className="text-stone-600">|</span>
+                        <span
+                          className={
+                            pNorth?.declaredPares
+                              ? 'text-emerald-300'
+                              : pNorth?.declaredPares === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Par:{pNorth?.declaredPares ? 'SÍ' : pNorth?.declaredPares === false ? 'NO' : '?'}
+                        </span>
+                      </span>
+                    </div>
+                    {/* Rivales */}
+                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
+                      <span className="text-rose-400 font-bold truncate max-w-[50px]">
+                        Rivales
+                      </span>
+                      <span className="flex items-center gap-1 font-black">
+                        <span
+                          className={
+                            pEast?.declaredPares
+                              ? 'text-rose-300'
+                              : pEast?.declaredPares === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Est:{pEast?.declaredPares ? 'SÍ' : pEast?.declaredPares === false ? 'NO' : '?'}
+                        </span>
+                        <span className="text-stone-600">|</span>
+                        <span
+                          className={
+                            pWest?.declaredPares
+                              ? 'text-rose-300'
+                              : pWest?.declaredPares === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Oes:{pWest?.declaredPares ? 'SÍ' : pWest?.declaredPares === false ? 'NO' : '?'}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* JUEGO ROW */}
+                <div
+                  className={`mt-0.5 p-0.5 rounded transition-colors ${
+                    phase === 'juego_precheck' || phase === 'juego_bet'
+                      ? 'bg-amber-950/80 border border-amber-500/80 shadow-xs'
+                      : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[8px] font-bold text-stone-300 mb-0.5 px-0.5">
+                    <span className="flex items-center gap-1">
+                      <span className="text-amber-400">🔥</span>
+                      <span>JUEGO (&ge;31):</span>
+                    </span>
+                    <span className="text-[7.5px] text-stone-400 font-mono">
+                      {pSouth?.declaredJuego === null && pNorth?.declaredJuego === null
+                        ? 'Esperando consulta'
+                        : 'Certificado oficial'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-[8.5px]">
+                    {/* Tu Pareja */}
+                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
+                      <span className="text-emerald-400 font-bold truncate max-w-[55px]">
+                        Pareja
+                      </span>
+                      <span className="flex items-center gap-1 font-black">
+                        <span
+                          className={
+                            pSouth?.declaredJuego
+                              ? 'text-amber-300'
+                              : pSouth?.declaredJuego === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Tú:{pSouth?.declaredJuego ? 'SÍ' : pSouth?.declaredJuego === false ? 'NO' : '?'}
+                        </span>
+                        <span className="text-stone-600">|</span>
+                        <span
+                          className={
+                            pNorth?.declaredJuego
+                              ? 'text-amber-300'
+                              : pNorth?.declaredJuego === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Par:{pNorth?.declaredJuego ? 'SÍ' : pNorth?.declaredJuego === false ? 'NO' : '?'}
+                        </span>
+                      </span>
+                    </div>
+                    {/* Rivales */}
+                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
+                      <span className="text-rose-400 font-bold truncate max-w-[50px]">
+                        Rivales
+                      </span>
+                      <span className="flex items-center gap-1 font-black">
+                        <span
+                          className={
+                            pEast?.declaredJuego
+                              ? 'text-rose-300'
+                              : pEast?.declaredJuego === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Est:{pEast?.declaredJuego ? 'SÍ' : pEast?.declaredJuego === false ? 'NO' : '?'}
+                        </span>
+                        <span className="text-stone-600">|</span>
+                        <span
+                          className={
+                            pWest?.declaredJuego
+                              ? 'text-rose-300'
+                              : pWest?.declaredJuego === false
+                              ? 'text-stone-500'
+                              : 'text-stone-600'
+                          }
+                        >
+                          Oes:{pWest?.declaredJuego ? 'SÍ' : pWest?.declaredJuego === false ? 'NO' : '?'}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT SIDE OF TABLE: Platillo de Piedras de los Rivales */}
+            <div className="flex items-center gap-1.5 shrink-0 justify-center">
+              {renderPlatillo('Rivales', false, team1Piedras, target)}
+            </div>
           </div>
         </div>
 
@@ -247,54 +552,110 @@ export const Table: React.FC<TableProps> = ({
         </div>
       </div>
 
-      {/* 4. SOUTH: HUMAN PLAYER PRESENCE & CARDS (Bottom Center - Clear player presence + 100% Unobstructed Hand) */}
-      <div className="relative z-30 flex flex-col items-center pb-2 pt-1">
-        {/* South Player Badge with prominent Avatar (Crisp, sharp, non-blurry, never covering cards) */}
-        {pSouth && (
-          <div className="flex items-center gap-2.5 mb-1 px-3.5 py-1.5 rounded-2xl bg-stone-950 border-2 border-stone-800 hover:border-amber-500/70 shadow-xl">
-            <div className="relative shrink-0">
-              <CharacterAvatar
-                characterId={activeUser?.avatarId || pSouth.id}
-                characterName={activeUser?.name || pSouth.name}
-                size="md"
-                isSpeaking={!!pSouth.currentSpeech}
-                className="ring-2 ring-stone-900 shadow-md"
-              />
-              {manoIndex === 0 && (
-                <span
-                  className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-xs flex items-center justify-center shadow-lg border-2 border-stone-950 z-30 animate-bounce"
-                  title="Mano de la ronda de Mus"
-                >
-                  M
-                </span>
+      {/* 4. SOUTH: HUMAN PLAYER ROW (Left: Controls module, Center: 4 Cards, Right: Player Badge) */}
+      <div className="relative z-30 w-full px-2 sm:px-4 pb-2 pt-1 flex flex-col lg:flex-row items-center justify-between gap-2.5">
+        {/* LEFT OF CARDS: Controls module (Selector 1: «ese módulo a la izq. de las cartas») */}
+        <div className="w-full lg:w-[320px] xl:w-[350px] shrink-0 flex justify-center lg:justify-start order-2 lg:order-1">
+          {controlsNode}
+        </div>
+
+        {/* CENTER: 4 Player Cards with authentic Spanish Figures (Selector 2: «las cartas») */}
+        <div className="shrink-0 flex justify-center order-1 lg:order-2">
+          {pSouth && (
+            <CartoonPlayerHands
+              cards={pSouth.cards}
+              selectedIndices={pSouth.selectedToDiscard}
+              isDiscardPhase={isDiscardPhase}
+              onCardClick={onCardClick}
+            />
+          )}
+        </div>
+
+        {/* RIGHT OF CARDS: South Player Badge & Status (Selector 2's sibling: «el otro a la derecha») */}
+        <div className="w-full lg:w-[320px] xl:w-[350px] shrink-0 flex justify-center lg:justify-end order-3">
+          {pSouth && (
+            <div className="relative flex items-center gap-2.5 px-3.5 py-1.5 rounded-2xl bg-stone-950/95 border-2 border-stone-800 hover:border-amber-500/70 shadow-xl backdrop-blur-xs">
+              <div className="relative shrink-0">
+                <CharacterAvatar
+                  characterId={activeUser?.avatarId || pSouth.id}
+                  characterName={activeUser?.name || pSouth.name}
+                  size="md"
+                  isSpeaking={!!pSouth.currentSpeech}
+                  className="ring-2 ring-stone-900 shadow-md"
+                />
+                {manoIndex === 0 && (
+                  <span
+                    className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-xs flex items-center justify-center shadow-lg border-2 border-stone-950 z-30 animate-bounce"
+                    title="Mano de la ronda de Mus"
+                  >
+                    M
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col min-w-0 pr-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-serif font-black text-sm sm:text-base text-amber-200 truncate max-w-[120px] sm:max-w-[150px]">
+                    {activeUser?.name || pSouth.name}
+                  </span>
+                  <span className="text-[8px] sm:text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-emerald-700 text-emerald-100 uppercase tracking-wider border border-emerald-500/50">
+                    Tú (Sur)
+                  </span>
+                </div>
+                <div className="text-[10px] text-stone-400 font-mono">
+                  Pareja de {pNorth?.name || 'Norte'}
+                </div>
+
+                {/* Indicador de Pares y Juego de Tú (Sur) */}
+                <div className="flex items-center gap-1 mt-1 font-mono text-[9px] font-black">
+                  <span
+                    className={`px-1.5 py-0.5 rounded border transition-colors ${
+                      pSouth.hasPares
+                        ? 'bg-emerald-950 text-emerald-300 border-emerald-500 shadow-xs'
+                        : 'bg-stone-900 text-stone-400 border-stone-800'
+                    }`}
+                    title={
+                      pSouth.hasPares
+                        ? 'Tu mano TIENE Pares (participas en el lance)'
+                        : 'Tu mano NO tiene pares'
+                    }
+                  >
+                    {pSouth.declaredPares !== null
+                      ? `Pares: ${pSouth.declaredPares ? 'SÍ' : 'NO'}`
+                      : `Pares: ${pSouth.hasPares ? 'SÍ' : 'NO'}`}
+                  </span>
+
+                  <span
+                    className={`px-1.5 py-0.5 rounded border transition-colors ${
+                      pSouth.hasJuego
+                        ? 'bg-amber-950 text-amber-300 border-amber-500 shadow-xs'
+                        : 'bg-stone-900 text-stone-400 border-stone-800'
+                    }`}
+                    title={
+                      pSouth.hasJuego
+                        ? `Tu mano TIENE Juego (suma ${pSouth.juegoValue})`
+                        : `Tu mano NO tiene juego (Punto: ${pSouth.juegoValue})`
+                    }
+                  >
+                    {pSouth.declaredJuego !== null
+                      ? `Juego: ${pSouth.declaredJuego ? `SÍ (${pSouth.juegoValue})` : 'NO'}`
+                      : `Juego: ${pSouth.hasJuego ? `SÍ (${pSouth.juegoValue})` : `NO (${pSouth.juegoValue})`}`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Speech bubble for South if speaking */}
+              {pSouth.currentSpeech && (
+                <div className="absolute bottom-full mb-2 right-0 z-40 bg-amber-100 text-stone-950 border-2 border-stone-950 px-3 py-1 rounded-xl shadow-xl font-sans text-xs font-bold whitespace-nowrap animate-bounce">
+                  <span className="text-[10px] text-amber-800 font-mono block -mb-0.5 font-bold uppercase">
+                    {activeUser?.name || pSouth.name}:
+                  </span>
+                  <span>«{pSouth.currentSpeech}»</span>
+                </div>
               )}
             </div>
-
-            <div className="flex flex-col min-w-0 pr-1">
-              <div className="flex items-center gap-1.5">
-                <span className="font-serif font-black text-sm sm:text-base text-amber-200 truncate max-w-[120px] sm:max-w-[160px]">
-                  {activeUser?.name || pSouth.name}
-                </span>
-                <span className="text-[8px] sm:text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-emerald-700 text-emerald-100 uppercase tracking-wider border border-emerald-500/50">
-                  Tú (Sur)
-                </span>
-              </div>
-              <div className="text-[10px] text-stone-400 font-mono">
-                Pareja de {pNorth?.name || 'Norte'}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 4 Player Cards with authentic Spanish Figures (Sota, Caballo, Rey) and Faros */}
-        {pSouth && (
-          <CartoonPlayerHands
-            cards={pSouth.cards}
-            selectedIndices={pSouth.selectedToDiscard}
-            isDiscardPhase={isDiscardPhase}
-            onCardClick={onCardClick}
-          />
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
