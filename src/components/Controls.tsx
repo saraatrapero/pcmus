@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { LancePhase, LanceBetState } from '../types';
 import { sound } from '../sound';
 
@@ -35,6 +35,9 @@ export const Controls: React.FC<ControlsProps> = ({
   userJuegoSum,
   userJuegoDetail,
 }) => {
+  // Desplegable de envido personalizado (del 3 al 29 según reglamento solicitado)
+  const [customEnvido, setCustomEnvido] = useState<number>(3);
+
   const isMusQuestion = phase === 'mus_dialog';
   const isDiscarding = phase === 'discarding';
   const isParesCheck = phase === 'pares_precheck';
@@ -286,89 +289,147 @@ export const Controls: React.FC<ControlsProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {betState.currentBet === 0 ? (
-              <>
+          {betState.currentBet === 0 ? (
+            <div className="grid grid-cols-2 gap-2">
+              {/* 1. PASO */}
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playCard();
+                  onAction('paso');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-100 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
+                title="Pasar el turno sin apostar"
+              >
+                <span>✋</span>
+                <span>Paso</span>
+              </button>
+
+              {/* 2. ENVIDO (Envido reglamentario de 2 piedras) */}
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playEnvido();
+                  onAction('envido');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
+                title="Envido tradicional de 2 piedras"
+              >
+                <span>🪙</span>
+                <span>Envido (2)</span>
+              </button>
+
+              {/* 3. ENVIDO CON DESPLEGABLE DEL 3 AL 29 */}
+              <div
+                className="flex items-stretch rounded-xl border-2 border-black shadow-[3px_3px_0px_#000] bg-gradient-to-r from-amber-500 to-amber-400 overflow-hidden focus-within:ring-2 focus-within:ring-amber-300"
+                title="Envido personalizado con desplegable del 3 al 29"
+              >
                 <button
-                  onClick={() => {
-                    sound.playCard();
-                    onAction('paso');
-                  }}
-                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-100 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000]"
-                >
-                  Paso
-                </button>
-                <button
+                  type="button"
                   onClick={() => {
                     sound.playEnvido();
-                    onAction('envido');
+                    onAction(`envido:${customEnvido}`);
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000]"
+                  className="flex-1 py-2 px-1.5 text-stone-950 font-mono font-black text-xs sm:text-sm flex items-center justify-center gap-1 cursor-pointer active:translate-x-0.5 active:translate-y-0.5 transition hover:brightness-105 truncate"
+                  title={`Envidar ${customEnvido} piedras`}
                 >
-                  Envido (2)
+                  <span>Envido</span>
+                  <span className="bg-stone-950 text-amber-300 px-1.5 py-0.5 rounded text-[11px] font-mono font-black leading-none shadow-xs">
+                    {customEnvido}
+                  </span>
                 </button>
+                <div className="relative flex items-center bg-amber-600/95 border-l border-stone-950/40">
+                  <select
+                    value={customEnvido}
+                    onChange={(e) => setCustomEnvido(Number(e.target.value))}
+                    className="h-full py-1.5 pl-2 pr-5 bg-transparent text-stone-950 font-mono font-black text-xs cursor-pointer appearance-none focus:outline-hidden"
+                    title="Desplegable del 3 al 29"
+                    aria-label="Desplegable de envido del 3 al 29"
+                  >
+                    {Array.from({ length: 27 }, (_, i) => i + 3).map((n) => (
+                      <option key={n} value={n} className="bg-stone-900 text-amber-200 font-mono font-bold">
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="absolute right-1 pointer-events-none text-[8.5px] text-stone-950 font-black">
+                    ▼
+                  </span>
+                </div>
+              </div>
+
+              {/* 4. ÓRDAGO */}
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playOrdago();
+                  onAction('ordago');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 animate-pulse cursor-pointer"
+                title="Lanzar Órdago"
+              >
+                <span>🔥</span>
+                <span>¡ÓRDAGO!</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => {
-                    sound.playEnvido();
-                    onAction('mas');
-                  }}
-                  className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000]"
-                >
-                  Envido (4)
-                </button>
-                <button
-                  onClick={() => {
-                    sound.playOrdago();
-                    onAction('ordago');
-                  }}
-                  className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] animate-pulse"
-                >
-                  ¡ÓRDAGO!
-                </button>
-              </>
-            ) : (
-              <>
-                <button
+                  type="button"
                   onClick={() => {
                     sound.playChip();
                     onAction('quiero');
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000]"
+                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  ✓ Quiero ({betState.isOrdago ? 'Órdago' : betState.currentBet})
+                  <span>✓</span>
+                  <span>Quiero ({betState.isOrdago ? 'Órdago' : betState.currentBet})</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     sound.playCard();
                     onAction('no_quiero');
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000]"
+                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  ✗ No Quiero
+                  <span>✗</span>
+                  <span>No Quiero</span>
                 </button>
-                {!betState.isOrdago && (
+              </div>
+
+              {!betState.isOrdago && (
+                <div className="grid grid-cols-2 gap-2">
                   <button
+                    type="button"
                     onClick={() => {
                       sound.playEnvido();
                       onAction('mas');
                     }}
-                    className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000]"
+                    className="py-2 px-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1 cursor-pointer truncate"
                   >
-                    +2 Más ({betState.currentBet + 2})
+                    <span>+2 Más</span>
+                    <span className="text-[10px] text-stone-900 bg-amber-300/80 px-1 py-0.2 rounded font-mono font-bold">
+                      ({betState.currentBet + 2})
+                    </span>
                   </button>
-                )}
-                <button
-                  onClick={() => {
-                    sound.playOrdago();
-                    onAction('ordago');
-                  }}
-                  className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] animate-pulse"
-                >
-                  ¡ÓRDAGO!
-                </button>
-              </>
-            )}
-          </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playOrdago();
+                      onAction('ordago');
+                    }}
+                    className="py-2 px-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 animate-pulse cursor-pointer"
+                  >
+                    <span>🔥</span>
+                    <span>¡ÓRDAGO!</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

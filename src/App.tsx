@@ -841,7 +841,7 @@ export default function App() {
   // Handle betting action from user or AI
   const executeBetAction = (
     seat: number,
-    action: 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero',
+    action: 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero' | string,
     lanceKey: string
   ) => {
     const actingPlayer = players[seat];
@@ -881,13 +881,20 @@ export default function App() {
       return;
     }
 
-    if (action === 'envido') {
+    if (action === 'envido' || (typeof action === 'string' && action.startsWith('envido'))) {
       sound.playEnvido();
+      let stones = 2;
+      if (typeof action === 'string' && action.startsWith('envido:')) {
+        const parsed = parseInt(action.split(':')[1], 10);
+        if (!isNaN(parsed) && parsed >= 2) stones = parsed;
+      }
+
       setLanceBets((prev) => ({
         ...prev,
         [lanceKey]: {
           ...prev[lanceKey],
-          currentBet: 2,
+          currentBet: stones,
+          previousBet: 0,
           lastBettorTeam: actingTeam,
           lastBettorIndex: seat,
         },
@@ -896,9 +903,9 @@ export default function App() {
       const nextSeat = getNextOpposingBettorSeat(seat, actingTeam, lanceKey, players);
       if (nextSeat !== null) {
         if (nextSeat === 0) {
-          setRecentEvent(`¡${actingPlayer.name} envida 2 piedras! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
+          setRecentEvent(`¡${actingPlayer.name} envida ${stones} piedras! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
         } else {
-          setRecentEvent(`¡${actingPlayer.name} envida 2 piedras!`);
+          setRecentEvent(`¡${actingPlayer.name} envida ${stones} piedras!`);
         }
         setCurrentTurn(nextSeat);
       } else {
@@ -911,14 +918,21 @@ export default function App() {
       return;
     }
 
-    if (action === 'mas') {
+    if (action === 'mas' || (typeof action === 'string' && action.startsWith('mas'))) {
       sound.playEnvido();
-      const newBet = (currentBet.currentBet || 0) + 2;
+      let added = 2;
+      if (typeof action === 'string' && action.startsWith('mas:')) {
+        const parsed = parseInt(action.split(':')[1], 10);
+        if (!isNaN(parsed) && parsed >= 2) added = parsed;
+      }
+      const previousAmount = currentBet.currentBet || 0;
+      const newBet = previousAmount + added;
       setLanceBets((prev) => ({
         ...prev,
         [lanceKey]: {
           ...prev[lanceKey],
           currentBet: newBet,
+          previousBet: previousAmount,
           lastBettorTeam: actingTeam,
           lastBettorIndex: seat,
         },
@@ -927,9 +941,9 @@ export default function App() {
       const nextSeat = getNextOpposingBettorSeat(seat, actingTeam, lanceKey, players);
       if (nextSeat !== null) {
         if (nextSeat === 0) {
-          setRecentEvent(`¡${actingPlayer.name} sube dos más (${newBet} piedras)! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
+          setRecentEvent(`¡${actingPlayer.name} sube ${added} más (${newBet} piedras)! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
         } else {
-          setRecentEvent(`¡${actingPlayer.name} sube dos más! Total: ${newBet} piedras.`);
+          setRecentEvent(`¡${actingPlayer.name} sube ${added} más! Total: ${newBet} piedras.`);
         }
         setCurrentTurn(nextSeat);
       } else {
@@ -1297,7 +1311,15 @@ export default function App() {
 
       let speech = 'Paso.';
       if (action === 'envido') speech = getCharacterLine(user?.id || 'tio_gil', 'envido') || '¡Envido dos piedras!';
+      if (typeof action === 'string' && action.startsWith('envido:')) {
+        const stones = action.split(':')[1];
+        speech = `¡Envido ${stones} piedras!`;
+      }
       if (action === 'mas') speech = '¡Dos más!';
+      if (typeof action === 'string' && action.startsWith('mas:')) {
+        const stones = action.split(':')[1];
+        speech = `¡${stones} más!`;
+      }
       if (action === 'ordago') speech = getCharacterLine(user?.id || 'tio_gil', 'ordago') || '¡¡ÓRDAGO!!';
       if (action === 'quiero') speech = getCharacterLine(user?.id || 'tio_gil', 'quiero') || '¡Quiero!';
       if (action === 'no_quiero') speech = getCharacterLine(user?.id || 'tio_gil', 'noQuiero') || 'No quiero.';
