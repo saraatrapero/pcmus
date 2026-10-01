@@ -39,6 +39,18 @@ export const gazeArrow = (seatIndex: number, gaze: number) => {
   return dy > 0 ? '↙️' : '↖️';
 };
 
+// "Pares sí / no", "Juego sí / no" as declared out loud by a player
+export const DeclarationChip: React.FC<{ label: string; value: boolean }> = ({ label, value }) => (
+  <span
+    className={`px-1 rounded border ${
+      value ? 'bg-emerald-950 text-emerald-300 border-emerald-500/70' : 'bg-stone-900 text-stone-400 border-stone-700'
+    }`}
+    title={`${label}: ${value ? 'sí' : 'no'}`}
+  >
+    {label} {value ? 'sí' : 'no'}
+  </span>
+);
+
 interface SeatedPlayerProps {
   player: Player;
   seatPosition: 'north' | 'east' | 'west';
@@ -110,6 +122,13 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
       >
         {gazeArrow(seatIndex, gaze)} {gazeLabel}
       </div>
+      {/* Official Pares / Juego declarations (only once this player has spoken) */}
+      {(player.declaredPares != null || player.declaredJuego != null) && (
+        <div className="mt-0.5 flex items-center gap-0.5 text-[8px] sm:text-[9px] font-mono font-black">
+          {player.declaredPares != null && <DeclarationChip label="Pares" value={player.declaredPares} />}
+          {player.declaredJuego != null && <DeclarationChip label="Juego" value={player.declaredJuego} />}
+        </div>
+      )}
       {knownByYourTeam.length > 0 && (
         <div
           className={`mt-0.5 text-[8px] sm:text-[9px] font-mono font-black px-1 rounded-full border max-w-full truncate ${

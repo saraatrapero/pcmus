@@ -1,7 +1,7 @@
 import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
 import { Player, LancePhase, LanceBetState, TeamScore, Seña, Card } from '../types';
 import { GazeTarget, IntelState, SEAT_NAMES, señaShortLabel } from '../gazeSystem';
-import { SeatedPlayer } from './SeatedPlayer';
+import { SeatedPlayer, DeclarationChip } from './SeatedPlayer';
 import { CartoonPlayerHands } from './CartoonPlayerHands';
 import { CharacterAvatar } from './CharacterAvatar';
 import { FournierCard } from './FournierCard';
@@ -478,6 +478,12 @@ export const Table: React.FC<TableProps> = ({
                 </span>
               )}
             </div>
+            {(pSouth.declaredPares != null || pSouth.declaredJuego != null) && (
+              <div className="flex items-center gap-0.5 text-[9px] font-mono font-black">
+                {pSouth.declaredPares != null && <DeclarationChip label="Pares" value={pSouth.declaredPares} />}
+                {pSouth.declaredJuego != null && <DeclarationChip label="Juego" value={pSouth.declaredJuego} />}
+              </div>
+            )}
             {onSetHumanGaze && (
               <>
                 <span className="text-[10px] font-mono font-black text-sky-300">👀 Mirar a:</span>
