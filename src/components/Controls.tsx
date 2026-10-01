@@ -55,7 +55,7 @@ export const Controls: React.FC<ControlsProps> = ({
     (phase === 'juego_bet' && !userHasJuego);
 
   return (
-    <div className="bg-stone-950/95 border-2 border-amber-600 rounded-2xl p-2 shadow-xl text-stone-100 w-full backdrop-blur-md">
+    <div className="relative bg-gradient-to-b from-[#2a1709] to-[#160c05] border border-brass-500/60 rounded-2xl p-2.5 sm:p-3 shadow-[0_10px_30px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(243,214,140,0.15)] text-stone-100 max-w-2xl w-full mx-auto my-1">
       {/* Turn indicator / status header */}
       <div className="flex items-center justify-between border-b border-stone-800 pb-1 mb-1.5">
         <div className="flex items-center gap-1.5">
@@ -64,7 +64,7 @@ export const Controls: React.FC<ControlsProps> = ({
               isPlayerTurn ? 'bg-emerald-400' : 'bg-amber-500'
             }`}
           />
-          <span className="text-[10px] sm:text-[11px] font-mono font-black uppercase tracking-wider text-amber-300">
+          <span className="text-sm font-mono font-bold uppercase tracking-wider text-brass-400">
             Fase: <span className="text-white font-mono">{currentLanceName}</span>
           </span>
         </div>
@@ -72,7 +72,7 @@ export const Controls: React.FC<ControlsProps> = ({
         {/* Señas trigger */}
         <button
           onClick={onOpenSeñas}
-          className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-amber-300 text-[10px] sm:text-[11px] font-mono font-black border border-amber-500/80 shadow-xs transition active:translate-x-0.5 active:translate-y-0.5"
+          className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-stone-900/80 hover:bg-stone-800 text-brass-300 text-sm font-mono font-bold border border-brass-500/70 shadow-xs transition active:translate-y-0.5 hover:-translate-y-px"
           title="Enviar seña al compañero"
         >
           <span>🤫</span>
@@ -82,9 +82,9 @@ export const Controls: React.FC<ControlsProps> = ({
 
       {/* When waiting for AI players */}
       {!isPlayerTurn && (
-        <div className="py-2 px-2.5 rounded-xl bg-stone-900 border border-stone-800 text-center flex items-center justify-center gap-2">
+        <div className="py-2.5 px-3 rounded-xl bg-black/30 border border-stone-800 text-center flex items-center justify-center gap-2">
           <div className="w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin shrink-0" />
-          <span className="text-[11px] sm:text-xs font-mono text-stone-300 font-bold truncate">
+          <span className="text-sm font-mono text-stone-300 font-semibold truncate">
             {waitingMessage || 'Esperando turno...'}
           </span>
         </div>
@@ -98,7 +98,7 @@ export const Controls: React.FC<ControlsProps> = ({
               sound.playCard();
               onAction('mus');
             }}
-            className="flex-1 py-2 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-black text-xs tracking-wide shadow-md transition active:translate-x-0.5 active:translate-y-0.5 border border-black flex items-center justify-center gap-1.5 cursor-pointer"
+            className="flex-1 py-2 px-2.5 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white font-mono font-extrabold uppercase text-sm sm:text-base tracking-wide shadow-md transition active:translate-y-0.5 hover:-translate-y-px border border-black flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <span>🔄</span>
             <span>PEDIR MUS</span>
@@ -108,7 +108,7 @@ export const Controls: React.FC<ControlsProps> = ({
               sound.playEnvido();
               onAction('no_mus');
             }}
-            className="flex-1 py-2 px-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-mono font-black text-xs tracking-wide shadow-md transition active:translate-x-0.5 active:translate-y-0.5 border border-black flex items-center justify-center gap-1.5 cursor-pointer"
+            className="flex-1 py-2 px-2.5 rounded-xl bg-gradient-to-b from-rose-600 to-rose-800 hover:from-rose-500 hover:to-rose-700 text-white font-mono font-extrabold uppercase text-sm sm:text-base tracking-wide shadow-md transition active:translate-y-0.5 hover:-translate-y-px border border-black flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <span>⛔</span>
             <span>NO HAY MUS</span>
@@ -129,9 +129,9 @@ export const Controls: React.FC<ControlsProps> = ({
               sound.playCard();
               onAction('discard');
             }}
-            className={`w-full py-2 px-3 rounded-xl font-mono font-black text-xs tracking-wide shadow-md transition border border-black flex items-center justify-center gap-1.5 ${
+            className={`w-full py-2 px-3 rounded-xl font-mono font-extrabold uppercase text-sm sm:text-base tracking-wide shadow-md transition border border-black flex items-center justify-center gap-1.5 ${
               selectedCardCount > 0
-                ? 'bg-amber-400 hover:bg-amber-300 text-stone-950 cursor-pointer active:translate-x-0.5 active:translate-y-0.5'
+                ? 'bg-gradient-to-b from-brass-400 to-brass-600 hover:from-brass-300 hover:to-brass-500 text-stone-950 cursor-pointer active:translate-y-0.5 hover:-translate-y-px'
                 : 'bg-stone-800 text-stone-500 border-stone-700 cursor-not-allowed opacity-75'
             }`}
           >
@@ -298,7 +298,7 @@ export const Controls: React.FC<ControlsProps> = ({
                   sound.playCard();
                   onAction('paso');
                 }}
-                className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-100 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
+                className="py-2.5 px-3 rounded-xl bg-gradient-to-b from-stone-600 to-stone-800 hover:from-stone-500 hover:to-stone-700 text-stone-100 font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1.5 cursor-pointer"
                 title="Pasar el turno sin apostar"
               >
                 <span>✋</span>
@@ -312,7 +312,7 @@ export const Controls: React.FC<ControlsProps> = ({
                   sound.playEnvido();
                   onAction('envido');
                 }}
-                className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
+                className="py-2.5 px-3 rounded-xl bg-gradient-to-b from-sky-600 to-blue-800 hover:from-sky-500 hover:to-blue-700 text-white font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1.5 cursor-pointer"
                 title="Envido tradicional de 2 piedras"
               >
                 <span>🪙</span>
@@ -321,7 +321,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
               {/* 3. ENVIDO CON DESPLEGABLE DEL 3 AL 29 */}
               <div
-                className="flex items-stretch rounded-xl border-2 border-black shadow-[3px_3px_0px_#000] bg-gradient-to-r from-amber-500 to-amber-400 overflow-hidden focus-within:ring-2 focus-within:ring-amber-300"
+                className="flex items-stretch rounded-xl border border-black/50 shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] bg-gradient-to-b from-brass-400 to-brass-600 overflow-hidden focus-within:ring-2 focus-within:ring-amber-300"
                 title="Envido personalizado con desplegable del 3 al 29"
               >
                 <button
@@ -330,7 +330,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     sound.playEnvido();
                     onAction(`envido:${customEnvido}`);
                   }}
-                  className="flex-1 py-2 px-1.5 text-stone-950 font-mono font-black text-xs sm:text-sm flex items-center justify-center gap-1 cursor-pointer active:translate-x-0.5 active:translate-y-0.5 transition hover:brightness-105 truncate"
+                  className="flex-1 py-2 px-1.5 text-stone-950 font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base flex items-center justify-center gap-1 cursor-pointer active:translate-y-0.5 hover:-translate-y-px transition hover:brightness-105 truncate"
                   title={`Envidar ${customEnvido} piedras`}
                 >
                   <span>Envido</span>
@@ -365,7 +365,7 @@ export const Controls: React.FC<ControlsProps> = ({
                   sound.playOrdago();
                   onAction('ordago');
                 }}
-                className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 animate-pulse cursor-pointer"
+                className="py-2.5 px-3 rounded-xl bg-gradient-to-b from-red-500 to-red-800 hover:from-red-400 hover:to-red-700 text-white font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1.5 animate-pulse cursor-pointer"
                 title="Lanzar Órdago"
               >
                 <span>🔥</span>
@@ -381,7 +381,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     sound.playChip();
                     onAction('quiero');
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-2.5 px-3 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <span>✓</span>
                   <span>Quiero ({betState.isOrdago ? 'Órdago' : betState.currentBet})</span>
@@ -392,7 +392,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     sound.playCard();
                     onAction('no_quiero');
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-2.5 px-3 rounded-xl bg-gradient-to-b from-stone-600 to-stone-800 hover:from-stone-500 hover:to-stone-700 text-stone-100 font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <span>✗</span>
                   <span>No Quiero</span>
@@ -407,7 +407,7 @@ export const Controls: React.FC<ControlsProps> = ({
                       sound.playEnvido();
                       onAction('mas');
                     }}
-                    className="py-2 px-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1 cursor-pointer truncate"
+                    className="py-2 px-2.5 rounded-xl bg-gradient-to-b from-brass-400 to-brass-600 hover:from-brass-300 hover:to-brass-500 text-stone-950 font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1 cursor-pointer truncate"
                   >
                     <span>+2 Más</span>
                     <span className="text-[10px] text-stone-900 bg-amber-300/80 px-1 py-0.2 rounded font-mono font-bold">
@@ -421,7 +421,7 @@ export const Controls: React.FC<ControlsProps> = ({
                       sound.playOrdago();
                       onAction('ordago');
                     }}
-                    className="py-2 px-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-mono font-black text-xs sm:text-sm border-2 border-black transition active:translate-x-0.5 active:translate-y-0.5 shadow-[3px_3px_0px_#000] flex items-center justify-center gap-1.5 animate-pulse cursor-pointer"
+                    className="py-2 px-2.5 rounded-xl bg-gradient-to-b from-red-500 to-red-800 hover:from-red-400 hover:to-red-700 text-white font-mono font-extrabold uppercase tracking-wide text-sm sm:text-base border border-black/50 transition active:translate-y-0.5 hover:-translate-y-px shadow-[0_3px_0_rgba(0,0,0,0.55),0_6px_14px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] flex items-center justify-center gap-1.5 animate-pulse cursor-pointer"
                   >
                     <span>🔥</span>
                     <span>¡ÓRDAGO!</span>

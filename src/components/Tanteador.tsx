@@ -66,7 +66,7 @@ export const Tanteador: React.FC<TanteadorProps> = ({
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto bg-stone-950 border-2 border-amber-700/60 rounded-2xl px-3 py-1.5 shadow-xl text-stone-100 font-sans mb-1 flex flex-col sm:flex-row items-center justify-between gap-2">
+    <div className="w-full max-w-5xl mx-auto bg-gradient-to-b from-[#24140a] to-[#140b05] border border-brass-500/50 rounded-2xl px-3 py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(243,214,140,0.12)] text-stone-100 font-sans mb-1 flex flex-col sm:flex-row items-center justify-between gap-2">
       {/* Team 0 (Nosotros) */}
       <div className="flex items-center gap-2.5 flex-1 justify-start">
         <div className="flex items-center gap-1.5">
@@ -82,7 +82,7 @@ export const Tanteador: React.FC<TanteadorProps> = ({
         </div>
 
         <div className="flex items-baseline gap-1 bg-stone-900 px-2 py-0.5 rounded-lg border border-emerald-500/40">
-          <span className="text-base sm:text-lg font-black text-amber-300 font-mono">
+          <span className="text-lg sm:text-xl font-extrabold text-brass-300 font-mono">
             {scoreTeam0.piedras}
           </span>
           <span className="text-[10px] text-stone-400 font-mono">/{targetPiedras}</span>
@@ -111,7 +111,7 @@ export const Tanteador: React.FC<TanteadorProps> = ({
         {renderTokens(scoreTeam1.piedras)}
 
         <div className="flex items-baseline gap-1 bg-stone-900 px-2 py-0.5 rounded-lg border border-rose-500/40">
-          <span className="text-base sm:text-lg font-black text-amber-300 font-mono">
+          <span className="text-lg sm:text-xl font-extrabold text-brass-300 font-mono">
             {scoreTeam1.piedras}
           </span>
           <span className="text-[10px] text-stone-400 font-mono">/{targetPiedras}</span>

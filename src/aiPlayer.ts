@@ -8,6 +8,7 @@ import {
 } from './musLogic';
 import { PC_MUS_CHARACTERS } from './characters';
 import { userProfileEngine } from './userProfileEngine';
+import { maxSeñaStrength } from './gazeSystem';
 
 export type LanceActionType = 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero';
 
@@ -15,6 +16,12 @@ export interface LanceAIDecision {
   action: LanceActionType;
   speech: string;
   gesture?: string;
+}
+
+// What the AI's team has learned through señas this hand
+export interface SeñaIntel {
+  partnerSeñas: string[]; // señas received from the partner
+  rivalSeñas: string[]; // señas caught from the rivals
 }
 
 export function decideMusOrNoMus(player: Player): { wantsMus: boolean; speech: string } {
@@ -94,7 +101,8 @@ export function decideLanceAction(
   lance: 'grande' | 'chica' | 'pares' | 'juego' | 'punto',
   betState: LanceBetState,
   teamScore: number,
-  rivalScore: number
+  rivalScore: number,
+  intel?: SeñaIntel
 ): LanceAIDecision {
   const char = PC_MUS_CHARACTERS.find((c) => c.id === player.id) || PC_MUS_CHARACTERS[0];
   const handSum = getHandSum(player.cards);
@@ -134,8 +142,27 @@ export function decideLanceAction(
     else strength = 3;
   }
 
-  // Factor in bluff probability
-  const isBluffing = Math.random() < player.bluffRate * 0.35;
+  // Señas: knowing the partner's cards lets the AI play the team's hand,
+  // knowing the rivals' cards lets it avoid traps and punish weak hands.
+  let rivalKnownStrong = false;
+  if (intel) {
+    const partnerEst = maxSeñaStrength(intel.partnerSeñas, lance);
+    if (partnerEst !== undefined) {
+      strength = Math.max(strength, partnerEst) + (partnerEst >= 6 ? 0.5 : 0);
+    }
+    const rivalEst = maxSeñaStrength(intel.rivalSeñas, lance);
+    if (rivalEst !== undefined) {
+      if (rivalEst >= strength + 1) {
+        strength -= 2.5;
+        rivalKnownStrong = true;
+      } else if (rivalEst <= 3) {
+        strength += 1.5;
+      }
+    }
+  }
+
+  // Factor in bluff probability (nobody bluffs into a hand they know is better)
+  const isBluffing = !rivalKnownStrong && Math.random() < player.bluffRate * 0.35;
   if (isBluffing) {
     strength += 4;
   }

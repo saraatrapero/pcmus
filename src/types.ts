@@ -31,7 +31,7 @@ export interface BetHistoryItem {
 
 export interface LanceBetState {
   currentBet: number; // stones at stake
-  previousBet?: number; // stones previously at stake before a raise
+  previousBet?: number; // amount already on the table before the last raise (paid if declined)
   lastBettorTeam: number | null; // 0: Player's team (seats 0 & 2), 1: Rival team (seats 1 & 3)
   lastBettorIndex: number | null;
   history: BetHistoryItem[];

@@ -261,7 +261,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             {/* Table center label */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center opacity-30">
-                <div className="text-4xl font-serif font-black text-amber-300">PC MUS</div>
+                <div className="text-4xl font-display font-black text-brass-300">PC MUS</div>
                 <div className="text-xs font-mono text-stone-300">MESA VERDE DE 1996</div>
               </div>
             </div>

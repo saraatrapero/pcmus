@@ -89,7 +89,6 @@ export const SeñasModal: React.FC<SeñasModalProps> = ({
                 {hasCondition && !isBlockedFirstHand ? (
                   <button
                     onClick={() => {
-                      sound.playSeña();
                       onSendSeña(seña, true);
                       onClose();
                     }}
@@ -116,8 +115,9 @@ export const SeñasModal: React.FC<SeñasModalProps> = ({
             mentir o pasar señas parciales).
           </div>
           <div>
-            👁️ <strong className="text-stone-400">Riesgo:</strong> Al igual que en la mesa, si un rival
-            capta tu gesto, advertirá tu jugada y contraatacará.
+            👁️ <strong className="text-stone-400">Miradas:</strong> la seña se hace en el instante en que
+            la envías. Tu compañero solo la recibe si te está mirando, y cualquier rival que te mire en
+            ese momento sabrá tus cartas. Vigila los cuellos de la mesa (o usa la barra rápida de señas).
           </div>
         </div>
       </div>

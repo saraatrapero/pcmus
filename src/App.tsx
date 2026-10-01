@@ -10,14 +10,12 @@ import {
   TournamentMatch,
   Seña,
   GameLogEntry,
-  MultiplayerRoom,
 } from './types';
 import { PC_MUS_CHARACTERS, CharacterInfo, CAMEOS, Cameo, getCharacterLine } from './characters';
 import {
   createDeck,
   evaluatePares,
   getHandSum,
-  getMusRank,
   getWinningTeamForLance,
   describeParesHand,
   describeJuegoHand,
@@ -44,8 +42,45 @@ import { MultiplayerChatModal } from './components/MultiplayerChatModal';
 import { UserControlModal } from './components/UserControlModal';
 import { userProfileEngine, UserProfile } from './userProfileEngine';
 import { multiplayerService } from './multiplayer/multiplayerService';
+import { MultiplayerRoom } from './types';
+import { getMusRank } from './musLogic';
 import { RecuentoOverlay } from './components/RecuentoOverlay';
 import { computeHandRecountPlan, HandRecountPlan } from './recuentoCalculator';
+import {
+  GazeTarget,
+  IntelState,
+  emptyIntel,
+  addIntel,
+  pickNextGaze,
+  randomGazeDuration,
+  getValidSeñas,
+  partnerOf,
+  opponentsOf,
+  señaShortLabel,
+} from './gazeSystem';
+
+// Fisher–Yates shuffle (discard pile recycling, tournament rival draw)
+function shuffleArray<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// Phases in which señas can be passed around the table
+const SEÑA_PHASES: LancePhase[] = [
+  'mus_dialog',
+  'discarding',
+  'grande',
+  'chica',
+  'pares_precheck',
+  'pares_bet',
+  'juego_precheck',
+  'juego_bet',
+  'punto_bet',
+];
 
 export default function App() {
   // Screen views: 'select' | 'bracket' | 'game' | 'multiplayer' | 'tutorial'
@@ -98,6 +133,31 @@ export default function App() {
   const handWonRef = React.useRef<boolean>(false);
   const isTransitioningRef = React.useRef<boolean>(false);
   const pendingTimersRef = React.useRef<number[]>([]);
+  // Mirrors isTransitioningRef so the UI can lock the buttons during transitions
+  const [isTransitioning, setIsTransitioningState] = useState<boolean>(false);
+  const transitionEndAtRef = React.useRef<number>(0);
+  const setTransitioning = (value: boolean) => {
+    isTransitioningRef.current = value;
+    if (!value) transitionEndAtRef.current = Date.now();
+    setIsTransitioningState(value);
+  };
+
+  // Gaze & señas: where each seat is looking and what each team knows about the others' cards
+  const [gazes, setGazes] = useState<GazeTarget[]>([-1, -1, -1, -1]);
+  const [intel, setIntel] = useState<IntelState>(emptyIntel());
+  const gazesRef = useRef<GazeTarget[]>(gazes);
+  const intelRef = useRef<IntelState>(intel);
+  const playersRef = useRef<Player[]>([]);
+  const phaseRef = useRef<LancePhase>('dealing');
+  const showAllCardsRef = useRef<boolean>(false);
+  const nextGazeChangeRef = useRef<number[]>([0, 0, 0, 0]);
+  const señasSentRef = useRef<Set<string>>(new Set());
+  // Latest state for code running inside timers (avoids stale closures)
+  const lanceBetsRef = useRef<Record<string, LanceBetState>>({});
+  const score0Ref = useRef<TeamScore>({ piedras: 0, juegosWon: 0 });
+  const score1Ref = useRef<TeamScore>({ piedras: 0, juegosWon: 0 });
+  const discardPileRef = useRef<Card[]>([]);
+  const handleAITurnRef = useRef<() => void>(() => {});
 
   const clearAllPendingTimers = () => {
     pendingTimersRef.current.forEach((t) => clearTimeout(t));
@@ -106,7 +166,16 @@ export default function App() {
 
   const safeTimeout = (fn: () => void, ms: number) => {
     const timer = window.setTimeout(() => {
-      fn();
+      pendingTimersRef.current = pendingTimersRef.current.filter((t) => t !== timer);
+      // Once the game is decided, pending lance transitions must not overwrite 'game_over'
+      if (handWonRef.current) return;
+      try {
+        fn();
+      } catch (err) {
+        // Never leave the table stuck in a transition because of an unexpected error
+        console.error('Error en transición de la partida', err);
+        setTransitioning(false);
+      }
     }, ms);
     pendingTimersRef.current.push(timer);
     return timer;
@@ -269,10 +338,13 @@ export default function App() {
     if (mode === 'torneo') {
       // Set matches
       setTournamentRound(0);
+      const used = new Set([playerChar.id, partnerChar.id, rivalChars[0].id, rivalChars[1].id]);
+      const pool = shuffleArray(PC_MUS_CHARACTERS.filter((c) => !used.has(c.id)));
+      const pick = (i: number) => (pool[i] || pool[i % Math.max(pool.length, 1)] || rivalChars[i % 2]).name;
       setTournamentMatches([
         { roundName: 'Cuartos de Final', rivals: [rivalChars[0].name, rivalChars[1].name], defeated: false, current: true },
-        { roundName: 'Semifinales', rivals: ['El Isidoro', 'Doña Norma'], defeated: false, current: false },
-        { roundName: 'Gran Final', rivals: ['El Marqués', 'Tío Mateo'], defeated: false, current: false },
+        { roundName: 'Semifinales', rivals: [pick(0), pick(1)], defeated: false, current: false },
+        { roundName: 'Gran Final', rivals: [pick(2), pick(3)], defeated: false, current: false },
       ]);
       setView('bracket');
     } else {
@@ -345,8 +417,6 @@ export default function App() {
     const newDeck = createDeck();
     const dealtPlayers = currentPlayers.map((p, idx) => {
       const cards = newDeck.splice(0, 4);
-      const paresEval = evaluatePares(cards);
-      const handSum = getHandSum(cards);
       return {
         ...p,
         cards,
@@ -354,16 +424,18 @@ export default function App() {
         currentSpeech: null,
         lastGesture: null,
         saidMus: null,
-        hasPares: paresEval.level > 0,
+        hasPares: evaluatePares(cards).level > 0,
         declaredPares: null,
-        hasJuego: handSum >= 31,
+        hasJuego: getHandSum(cards) >= 31,
         declaredJuego: null,
-        juegoValue: handSum,
+        juegoValue: getHandSum(cards),
       };
     });
 
     setDeck(newDeck);
+    discardPileRef.current = [];
     setPlayers(dealtPlayers);
+    resetSeñasForNewCards();
     setShowAllCards(false);
     setManoIndex(mano);
     setCurrentTurn(mano);
@@ -371,7 +443,7 @@ export default function App() {
     setRecentEvent(`Mano: ${dealtPlayers[mano].name}. Se inicia consulta de Mus.`);
     isScoringRef.current = false;
     handWonRef.current = false;
-    isTransitioningRef.current = false;
+    setTransitioning(false);
     setRecountPlan(null);
     clearAllPendingTimers();
 
@@ -385,44 +457,20 @@ export default function App() {
     });
   };
 
-  // User hand precheck certification handler:
-  // The app certifies the hand automatically according to authentic Mus rules so no one can lie.
-  const handleUserPrecheckDeclaration = () => {
-    if (players.length === 0) return;
-    if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
-    const user = players[0];
-    if (!user) return;
+  const isPrecheckPhase = phase === 'pares_precheck' || phase === 'juego_precheck';
+  // The app certifies the human's pares/juego (nobody can lie), and skips seat 0 in a
+  // pares/juego lance when it has nothing to bet with.
+  const seat0NeedsAutomation =
+    currentTurn === 0 &&
+    (isPrecheckPhase ||
+      (phase === 'pares_bet' && !players[0]?.declaredPares) ||
+      (phase === 'juego_bet' && !players[0]?.declaredJuego));
 
-    if (phase === 'pares_precheck') {
-      const paresEval = evaluatePares(user.cards);
-      const hasPairs = paresEval.level > 0;
-      const paresDesc = describeParesHand(user.cards);
-      const speech = hasPairs ? '¡Pares sí!' : 'Pares no.';
-      setRecentEvent(
-        hasPairs
-          ? `La app certifica tus naipes: ¡TIENES PARES (${paresDesc.title})! Declaras: «${speech}».`
-          : 'La app certifica tus naipes: NO TIENES PARES. Declaras: «Pares no.».'
-      );
-      handleDeclarePares(0, hasPairs, speech);
-    } else if (phase === 'juego_precheck') {
-      const sum = getHandSum(user.cards);
-      const hasJuego = sum >= 31;
-      const speech = hasJuego ? '¡Juego sí!' : 'Juego no.';
-      setRecentEvent(
-        hasJuego
-          ? `La app certifica tus naipes (suma ${sum}): ¡TIENES JUEGO! Declaras: «${speech}».`
-          : `La app certifica tus naipes (suma ${sum}): NO TIENES JUEGO (Punto). Declaras: «${speech}».`
-      );
-      handleDeclareJuego(0, hasJuego, speech);
-    }
-  };
-
-  // AI & Automation Turn ticker (guarded against duplicate ticks and race loops)
+  // AI Turn automation ticker.
+  // Instead of a single timeout (which was lost if it fired during a transition and the game
+  // froze), it polls until the turn can be played, and always calls the latest handler.
   useEffect(() => {
     if (view !== 'game' || players.length === 0) return;
-    if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
-
-    // Only run during active turn-based phases (never during scoring, round_end, or discarding)
     const isTurnPhase = [
       'mus_dialog',
       'grande',
@@ -433,46 +481,167 @@ export default function App() {
       'juego_bet',
       'punto_bet',
     ].includes(phase);
+    if (!isTurnPhase || currentTurn < 0) return;
+    // Your own turn is automated only to certify your declaration or to skip a lance you can't bet in
+    if (currentTurn === 0 && !seat0NeedsAutomation) return;
 
-    if (!isTurnPhase) return;
-
-    const isPrecheck = phase === 'pares_precheck' || phase === 'juego_precheck';
-
-    // If it's precheck, the app automatically evaluates and declares for EVERYONE (including user seat 0)
-    // so that the player cannot lie and the app decides according to the real cards.
-    if (currentTurn === 0 && isPrecheck) {
-      const delays = getDelays();
-      const timer = window.setTimeout(() => {
-        if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
-        handleUserPrecheckDeclaration();
-      }, delays.aiTurn);
-      return () => clearTimeout(timer);
-    }
-
-    // Safety: If it's pares_bet or juego_bet and seat 0 has no pairs / no juego, seat 0 cannot bet!
-    if (currentTurn === 0) {
-      if (phase === 'pares_bet' && !players[0]?.declaredPares) {
-        const nextSeat = getNextEligibleBettorSeat(1, 'pares', players);
-        setCurrentTurn(nextSeat);
-        return;
+    const startedAt = Date.now();
+    const delay = currentTurn === 0 && !isPrecheckPhase ? 300 : getDelays().aiTurn;
+    let acted = false;
+    const interval = window.setInterval(() => {
+      if (acted) return;
+      if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
+      const now = Date.now();
+      // Wait the "thinking" delay, and let React render the state that ended a transition
+      if (now - startedAt < delay || now - transitionEndAtRef.current < 350) return;
+      acted = true;
+      try {
+        handleAITurnRef.current();
+      } catch (err) {
+        console.error('Error en el turno de la IA', err);
+        acted = false; // retry on the next tick instead of freezing
       }
-      if (phase === 'juego_bet' && !players[0]?.declaredJuego) {
-        const nextSeat = getNextEligibleBettorSeat(1, 'juego', players);
-        setCurrentTurn(nextSeat);
-        return;
+    }, 150);
+    return () => clearInterval(interval);
+  }, [currentTurn, phase, view, gameSpeed, players.length, seat0NeedsAutomation]);
+
+  // Keep refs in sync so the gaze ticker always reads the latest table state
+  gazesRef.current = gazes;
+  intelRef.current = intel;
+  playersRef.current = players;
+  phaseRef.current = phase;
+  showAllCardsRef.current = showAllCards;
+  lanceBetsRef.current = lanceBets;
+  score0Ref.current = scoreTeam0;
+  score1Ref.current = scoreTeam1;
+
+  const updateGazes = (next: GazeTarget[]) => {
+    gazesRef.current = next;
+    setGazes(next);
+  };
+
+  const updateIntel = (next: IntelState) => {
+    intelRef.current = next;
+    setIntel(next);
+  };
+
+  const resetSeñasForNewCards = () => {
+    señasSentRef.current = new Set();
+    updateIntel(emptyIntel());
+  };
+
+  // Briefly show a seña gesture above a seated player (only when your team saw it)
+  const flashGesture = (seat: number, gesture: string) => {
+    setPlayers((prev) => prev.map((p, i) => (i === seat ? { ...p, lastGesture: gesture } : p)));
+    window.setTimeout(() => {
+      setPlayers((prev) =>
+        prev.map((p, i) => (i === seat && p.lastGesture === gesture ? { ...p, lastGesture: null } : p))
+      );
+    }, 2200);
+  };
+
+  const sayBriefly = (seat: number, text: string, ms = 2400) => {
+    setPlayers((prev) => prev.map((p, i) => (i === seat ? { ...p, currentSpeech: text } : p)));
+    window.setTimeout(() => {
+      setPlayers((prev) =>
+        prev.map((p, i) => (i === seat && p.currentSpeech === text ? { ...p, currentSpeech: null } : p))
+      );
+    }, ms);
+  };
+
+  const getSeenSeñaQuote = (seat: number) => {
+    const char = PC_MUS_CHARACTERS.find((c) => c.id === playersRef.current[seat]?.id);
+    const lines = char?.dialogs.señaSeen || [];
+    return lines[Math.floor(Math.random() * lines.length)] || '¡Te he visto la seña!';
+  };
+
+  // An AI player passes a seña to its partner. Whoever is looking at the sender at that moment sees it.
+  const performAISeña = (seat: number, seña: Seña) => {
+    const table = playersRef.current;
+    const sender = table[seat];
+    if (!sender) return;
+    const currentGazes = gazesRef.current;
+    const team = sender.team;
+    const watchers = opponentsOf(seat).filter((o) => currentGazes[o] === seat);
+    señasSentRef.current.add(`${seat}:${seña.id}`);
+
+    let nextIntel = addIntel(intelRef.current, team, seat, seña.id);
+    if (watchers.length) {
+      nextIntel = addIntel(nextIntel, team === 0 ? 1 : 0, seat, seña.id);
+    }
+    updateIntel(nextIntel);
+
+    const label = señaShortLabel(seña.id);
+    if (team === 0) {
+      // Your partner (North) signals you: you were looking at them, so you see it
+      flashGesture(seat, seña.gesture);
+      sound.playSeña();
+      if (watchers.length) {
+        const catcher = watchers[0];
+        const quote = getSeenSeñaQuote(catcher);
+        sayBriefly(catcher, quote);
+        voiceEngine.speakCharacter(table[catcher].id, quote);
+        setRecentEvent(
+          `🤝 ${sender.name} te pasa seña: ${label}... ¡pero ${watchers.map((w) => table[w].name).join(' y ')} lo ha visto!`
+        );
+      } else {
+        setRecentEvent(`🤝 ${sender.name} te pasa seña a escondidas: «${label}» (${seña.meaning}).`);
       }
+      return;
     }
 
-    // Is it an AI turn?
-    if (currentTurn !== 0 && currentTurn >= 0) {
-      const delays = getDelays();
-      const timer = window.setTimeout(() => {
-        if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
-        handleAITurn();
-      }, delays.aiTurn);
-      return () => clearTimeout(timer);
+    // Rival seña: only visible to you if you or your partner were watching
+    if (watchers.includes(0)) {
+      flashGesture(seat, seña.gesture);
+      sound.playSeña();
+      setRecentEvent(`🕵️ ¡Has cazado la seña de ${sender.name}! ${seña.gesture} → ${seña.meaning}.`);
+    } else if (watchers.includes(2)) {
+      flashGesture(seat, seña.gesture);
+      sound.playSeña();
+      sayBriefly(2, '*(He visto la seña del rival...)*');
+      setRecentEvent(`🕵️ ${table[2].name} ha cazado la seña de ${sender.name}: «${label}».`);
     }
-  }, [currentTurn, phase, view, gameSpeed, players]);
+  };
+
+  // Gaze ticker: AIs turn their necks randomly and pass señas when nobody is watching
+  useEffect(() => {
+    if (view !== 'game') return;
+    const interval = window.setInterval(() => {
+      const table = playersRef.current;
+      if (table.length !== 4) return;
+      const now = Date.now();
+
+      // 1. Random neck movements
+      let changed = false;
+      const next = [...gazesRef.current] as GazeTarget[];
+      for (let seat = 1; seat < 4; seat++) {
+        if (now >= nextGazeChangeRef.current[seat]) {
+          next[seat] = pickNextGaze(seat, next[seat]);
+          nextGazeChangeRef.current[seat] = now + randomGazeDuration();
+          changed = true;
+        }
+      }
+      if (changed) updateGazes(next);
+
+      // 2. AI señas
+      if (!SEÑA_PHASES.includes(phaseRef.current) || showAllCardsRef.current) return;
+      for (let seat = 1; seat < 4; seat++) {
+        const p = table[seat];
+        const pending = getValidSeñas(p.cards).filter((s) => !señasSentRef.current.has(`${seat}:${s.id}`));
+        if (!pending.length) continue;
+        // The partner has to be looking at the sender to receive the seña
+        if (gazesRef.current[partnerOf(seat)] !== seat) continue;
+        const watched = opponentsOf(seat).some((o) => gazesRef.current[o] === seat);
+        // Careful players wait until nobody watches; careless ones sometimes get caught
+        const chance = watched ? 0.03 + p.bluffRate * 0.05 : 0.35;
+        if (Math.random() < chance) {
+          performAISeña(seat, pending[0]);
+          break; // one seña per tick keeps it readable
+        }
+      }
+    }, 450);
+    return () => clearInterval(interval);
+  }, [view]);
 
   // Execute AI action based on phase
   const handleAITurn = () => {
@@ -481,19 +650,29 @@ export default function App() {
     const aiPlayer = players[currentTurn];
     if (!aiPlayer) return;
 
-    // Pares declaration precheck
+    // Pares / Juego declarations (the app certifies every hand, including yours)
     if (phase === 'pares_precheck') {
-      const hasPairs = evaluatePares(aiPlayer.cards).level > 0;
-      handleDeclarePares(currentTurn, hasPairs);
+      if (currentTurn === 0) handleUserPrecheckDeclaration();
+      else handleDeclarePares(currentTurn, evaluatePares(aiPlayer.cards).level > 0);
+      return;
+    }
+    if (phase === 'juego_precheck') {
+      if (currentTurn === 0) handleUserPrecheckDeclaration();
+      else handleDeclareJuego(currentTurn, getHandSum(aiPlayer.cards) >= 31);
       return;
     }
 
-    // Juego declaration precheck
-    if (phase === 'juego_precheck') {
-      const hasJuego = getHandSum(aiPlayer.cards) >= 31;
-      handleDeclareJuego(currentTurn, hasJuego);
+    // Without pares / juego a player cannot bet in that lance: the turn moves on
+    if (phase === 'pares_bet' && !aiPlayer.declaredPares) {
+      setCurrentTurn(getNextEligibleBettorSeat((currentTurn + 1) % 4, 'pares', players));
       return;
     }
+    if (phase === 'juego_bet' && !aiPlayer.declaredJuego) {
+      setCurrentTurn(getNextEligibleBettorSeat((currentTurn + 1) % 4, 'juego', players));
+      return;
+    }
+
+    if (currentTurn === 0) return; // the human plays their own turn
 
     // Mus question phase
     if (phase === 'mus_dialog') {
@@ -514,10 +693,10 @@ export default function App() {
         setRecentEvent(`¡${aiPlayer.name} corta el mus! No hay mus.`);
         voiceEngine.speakCharacter(aiPlayer.id, speech);
         // Mus cut! Advance to Grande betting with safe transition
-        isTransitioningRef.current = true;
+        setTransitioning(true);
         const delays = getDelays();
         safeTimeout(() => {
-          isTransitioningRef.current = false;
+          setTransitioning(false);
           startLance('grande');
         }, delays.transition);
       }
@@ -527,18 +706,6 @@ export default function App() {
     // Betting phase (grande, chica, pares_bet, juego_bet, punto_bet)
     const isBettingLance = ['grande', 'chica', 'pares_bet', 'juego_bet', 'punto_bet'].includes(phase);
     if (!isBettingLance) return;
-
-    // If AI does not have pares or juego, they cannot bet in that lance!
-    if (phase === 'pares_bet' && !aiPlayer.declaredPares) {
-      const nextSeat = getNextEligibleBettorSeat((currentTurn + 1) % 4, 'pares', players);
-      setCurrentTurn(nextSeat);
-      return;
-    }
-    if (phase === 'juego_bet' && !aiPlayer.declaredJuego) {
-      const nextSeat = getNextEligibleBettorSeat((currentTurn + 1) % 4, 'juego', players);
-      setCurrentTurn(nextSeat);
-      return;
-    }
 
     const lanceKey =
       phase === 'grande'
@@ -551,17 +718,14 @@ export default function App() {
         ? 'juego'
         : 'punto';
 
-    const currentLanceBet = lanceBets[lanceKey];
+    const currentLanceBet = lanceBetsRef.current[lanceKey] || lanceBets[lanceKey];
 
-    // Regla de Oro: Si los rivales han apostado y el turno recae en el compañero (Norte, asiento 2),
-    // el compañero cede la palabra al usuario (asiento 0) si este es apto para el lance,
-    // garantizando que el jugador usuario siempre tiene la potestad de decidir si quiere o no quiere.
+    // Regla de Oro: when the rivals bet and the turn falls on your partner (North), the partner
+    // lets you decide whether to accept, as long as you can play this lance.
     if (currentTurn === 2 && currentLanceBet.currentBet > 0 && currentLanceBet.lastBettorTeam === 1) {
       if (isPlayerEligibleForLance(players[0], lanceKey)) {
         const deferSpeech = '¡Compañero, tú decides si queremos o no!';
-        setPlayers((prev) =>
-          prev.map((p, i) => (i === 2 ? { ...p, currentSpeech: deferSpeech } : p))
-        );
+        setPlayers((prev) => prev.map((p, i) => (i === 2 ? { ...p, currentSpeech: deferSpeech } : p)));
         voiceEngine.speakCharacter(aiPlayer.id, deferSpeech);
         setRecentEvent(`${aiPlayer.name} te cede la palabra: «${deferSpeech}»`);
         setCurrentTurn(0);
@@ -569,12 +733,17 @@ export default function App() {
       }
     }
 
+    const teamIntel = intelRef.current[aiPlayer.team];
     const decision = decideLanceAction(
       aiPlayer,
       lanceKey as any,
       currentLanceBet,
       aiPlayer.team === 0 ? scoreTeam0.piedras : scoreTeam1.piedras,
-      aiPlayer.team === 0 ? scoreTeam1.piedras : scoreTeam0.piedras
+      aiPlayer.team === 0 ? scoreTeam1.piedras : scoreTeam0.piedras,
+      {
+        partnerSeñas: teamIntel[partnerOf(currentTurn)] || [],
+        rivalSeñas: opponentsOf(currentTurn).flatMap((o) => teamIntel[o] || []),
+      }
     );
 
     // Apply speech
@@ -586,16 +755,18 @@ export default function App() {
     executeBetAction(currentTurn, decision.action, lanceKey);
   };
 
+  handleAITurnRef.current = handleAITurn;
+
   // Progress Mus turn in circle
   const advanceMusTurn = (fromSeat: number) => {
     const nextSeat = (fromSeat + 1) % 4;
     // If completed full circle back to manoIndex, everyone said Mus!
     if (nextSeat === manoIndex) {
       setRecentEvent('¡Los cuatro jugadores quieren Mus! Se procede a los descartes.');
-      isTransitioningRef.current = true;
+      setTransitioning(true);
       const delays = getDelays();
       safeTimeout(() => {
-        isTransitioningRef.current = false;
+        setTransitioning(false);
         setPhase('discarding');
         setCurrentTurn(0); // Give user turn to select discards
       }, delays.allMusPass);
@@ -610,87 +781,87 @@ export default function App() {
     const user = players[0];
     const userDiscardIndices = user.selectedToDiscard || [];
 
-    // Also compute AI discards
+    // Everybody draws from the same remaining deck (before, each player drew from its own copy
+    // and cards were duplicated). When it runs out, the previous discards are reshuffled.
+    let remainingDeck = [...deck];
+    let discardPile = [...discardPileRef.current];
     const updatedPlayers = players.map((p, idx) => {
-      let discards = idx === 0 ? userDiscardIndices : getAIDiscardIndices(p.cards);
-      // Draw replacements
-      const remainingDeck = [...deck];
+      const discards = idx === 0 ? userDiscardIndices : getAIDiscardIndices(p.cards);
       const newCards = [...p.cards];
 
       discards.forEach((dIdx) => {
+        if (remainingDeck.length === 0 && discardPile.length > 0) {
+          remainingDeck = shuffleArray(discardPile);
+          discardPile = [];
+        }
         if (remainingDeck.length > 0) {
           newCards[dIdx] = remainingDeck.pop()!;
         }
       });
-
-      const paresEval = evaluatePares(newCards);
-      const handSum = getHandSum(newCards);
+      discards.forEach((dIdx) => {
+        if (newCards[dIdx] !== p.cards[dIdx]) discardPile.push(p.cards[dIdx]);
+      });
 
       return {
         ...p,
         cards: newCards,
         selectedToDiscard: [],
         currentSpeech: null,
-        hasPares: paresEval.level > 0,
+        hasPares: evaluatePares(newCards).level > 0,
         declaredPares: null,
-        hasJuego: handSum >= 31,
+        hasJuego: getHandSum(newCards) >= 31,
         declaredJuego: null,
-        juegoValue: handSum,
+        juegoValue: getHandSum(newCards),
       };
     });
 
+    setDeck(remainingDeck);
+    discardPileRef.current = discardPile;
     setPlayers(updatedPlayers);
+    resetSeñasForNewCards();
     setRecentEvent('Se han repartido los nuevos naipes de descarte. Nueva consulta de Mus.');
     setPhase('mus_dialog');
     setCurrentTurn(manoIndex);
   };
 
-  // Helper to determine if a player can participate in betting for this lance
-  const isPlayerEligibleForLance = (p: Player, lance: string) => {
+  // Can this player take part in the betting of this lance?
+  const isPlayerEligibleForLance = (p: Player | undefined, lance: string) => {
+    if (!p) return false;
     if (lance === 'pares') return p.declaredPares === true;
     if (lance === 'juego') return p.declaredJuego === true;
     return true; // grande, chica, punto
   };
 
-  // Helper to find the next eligible bettor around the table
+  // Next player around the table who can bet in this lance
   const getNextEligibleBettorSeat = (fromSeat: number, lance: string, currentPlayers: Player[]) => {
     for (let step = 0; step < 4; step++) {
       const candidate = (fromSeat + step) % 4;
-      if (isPlayerEligibleForLance(currentPlayers[candidate], lance)) {
-        return candidate;
-      }
+      if (isPlayerEligibleForLance(currentPlayers[candidate], lance)) return candidate;
     }
     return fromSeat;
   };
 
-  // Helper to find next eligible bettor in opposing team
+  // Who answers a bet: when the rivals bet against you, you always decide (if you can play the
+  // lance), otherwise your partner; against the rivals, the next eligible rival.
   const getNextOpposingBettorSeat = (fromSeat: number, actingTeam: 0 | 1, lance: string, currentPlayers: Player[]) => {
     const opposingTeam = actingTeam === 0 ? 1 : 0;
-
-    // Regla de Oro: Cuando los rivales (actingTeam 1) apuestan contra el equipo del usuario (opposingTeam 0),
-    // el jugador usuario (asiento 0) SIEMPRE tiene la potestad de decidir si quiere o no quiere,
-    // siempre que sea apto para el lance activo (tenga pares/juego o lance abierto).
     if (opposingTeam === 0) {
-      if (isPlayerEligibleForLance(currentPlayers[0], lance)) {
-        return 0; // El usuario toma la decisión obligatoriamente
-      } else if (isPlayerEligibleForLance(currentPlayers[2], lance)) {
-        return 2; // Si el usuario no tiene pares/juego, defiende el compañero
-      }
+      if (isPlayerEligibleForLance(currentPlayers[0], lance)) return 0;
+      if (isPlayerEligibleForLance(currentPlayers[2], lance)) return 2;
       return null;
     }
-
-    // Cuando el equipo del usuario apuesta contra los rivales (opposingTeam 1):
     for (let step = 1; step <= 4; step++) {
       const candidate = (fromSeat + step) % 4;
-      if (currentPlayers[candidate].team === opposingTeam && isPlayerEligibleForLance(currentPlayers[candidate], lance)) {
+      if (currentPlayers[candidate]?.team === opposingTeam && isPlayerEligibleForLance(currentPlayers[candidate], lance)) {
         return candidate;
       }
     }
     return null;
   };
 
-  // Start a betting lance or declaration precheck
+  // Start a betting lance or the pares / juego declaration round
   const startLance = (lance: 'grande' | 'chica' | 'pares' | 'juego' | 'punto') => {
+    const players = playersRef.current;
     // Clear speech bubbles
     setPlayers((prev) => prev.map((p) => ({ ...p, currentSpeech: null })));
 
@@ -700,153 +871,158 @@ export default function App() {
       setRecentEvent('Comienza el lance: A LA GRANDE.');
       return;
     }
-
     if (lance === 'chica') {
       setPhase('chica');
       setCurrentTurn(manoIndex);
       setRecentEvent('Comienza el lance: A LA CHICA.');
       return;
     }
-
     if (lance === 'pares') {
       setPhase('pares_precheck');
       setCurrentTurn(manoIndex);
-      setRecentEvent(`Consulta de Pares: Empieza preguntando a ${players[manoIndex]?.name || 'Mano'} (Mano).`);
+      setRecentEvent(`Consulta de Pares: empieza preguntando a ${players[manoIndex]?.name || 'Mano'} (Mano).`);
       return;
     }
-
     if (lance === 'juego') {
       setPhase('juego_precheck');
       setCurrentTurn(manoIndex);
-      setRecentEvent(`Consulta de Juego (>= 31): Empieza preguntando a ${players[manoIndex]?.name || 'Mano'} (Mano).`);
+      setRecentEvent(`Consulta de Juego (>= 31): empieza preguntando a ${players[manoIndex]?.name || 'Mano'} (Mano).`);
       return;
     }
+    if (lance === 'punto') {
+      setPhase('punto_bet');
+      setCurrentTurn(manoIndex);
+      setRecentEvent('Nadie tiene Juego: ¡se juega al PUNTO!');
+    }
   };
 
-  // Pares Declaration Handler (Art. I/II: «La boca hace ley, nunca se puede mentir»)
-  const handleDeclarePares = (seat: number, hasPairs: boolean, customSpeech?: string) => {
-    const p = players[seat];
-    if (!p) return;
-    const speech = customSpeech || (hasPairs ? '¡Pares sí!' : 'Pares no.');
+  // The app certifies your pares / juego so nobody can lie («La boca hace ley»)
+  const handleUserPrecheckDeclaration = () => {
+    const user = playersRef.current[0];
+    if (!user) return;
+    if (phase === 'pares_precheck') {
+      const hasPairs = evaluatePares(user.cards).level > 0;
+      const speech = hasPairs ? '¡Pares sí!' : 'Pares no.';
+      handleDeclarePares(0, hasPairs, speech);
+      setRecentEvent(
+        hasPairs
+          ? `La app certifica tus naipes: ¡TIENES PARES (${describeParesHand(user.cards).title})! Declaras: «${speech}».`
+          : 'La app certifica tus naipes: NO TIENES PARES. Declaras: «Pares no.».'
+      );
+    } else if (phase === 'juego_precheck') {
+      const sum = getHandSum(user.cards);
+      const hasJuego = sum >= 31;
+      const speech = hasJuego ? '¡Juego sí!' : 'Juego no.';
+      handleDeclareJuego(0, hasJuego, speech);
+      setRecentEvent(
+        hasJuego
+          ? `La app certifica tus naipes (suma ${sum}): ¡TIENES JUEGO! Declaras: «${speech}».`
+          : `La app certifica tus naipes (suma ${sum}): NO TIENES JUEGO. Declaras: «${speech}».`
+      );
+    }
+  };
 
-    if (hasPairs) sound.playEnvido(); else sound.playCard();
+  // Shared declaration round for pares and juego
+  const handleDeclaration = (kind: 'pares' | 'juego', seat: number, has: boolean, customSpeech?: string) => {
+    const table = playersRef.current;
+    const p = table[seat];
+    if (!p) return;
+    const label = kind === 'pares' ? 'Pares' : 'Juego';
+    const speech = customSpeech || (has ? `¡${label} sí!` : `${label} no.`);
+    const field = kind === 'pares' ? 'declaredPares' : 'declaredJuego';
+
+    if (has) sound.playEnvido();
+    else sound.playCard();
     voiceEngine.speakCharacter(p.id, speech);
     setRecentEvent(`${p.name} declara: «${speech}».`);
 
-    const updatedPlayers = players.map((pl, idx) =>
-      idx === seat ? { ...pl, declaredPares: hasPairs, currentSpeech: speech } : pl
-    );
-    setPlayers(updatedPlayers);
+    const updatedPlayers = table.map((pl, idx) => (idx === seat ? { ...pl, [field]: has, currentSpeech: speech } : pl));
+    playersRef.current = updatedPlayers;
+    setPlayers((prev) => prev.map((pl, idx) => (idx === seat ? { ...pl, [field]: has, currentSpeech: speech } : pl)));
 
     const nextSeat = (seat + 1) % 4;
     if (nextSeat !== manoIndex) {
       setCurrentTurn(nextSeat);
-    } else {
-      // Full circle! Everyone declared Pares
-      const t0Has = updatedPlayers[0].declaredPares === true || updatedPlayers[2].declaredPares === true;
-      const t1Has = updatedPlayers[1].declaredPares === true || updatedPlayers[3].declaredPares === true;
-
-      isTransitioningRef.current = true;
-      const delays = getDelays();
-
-      if (!t0Has && !t1Has) {
-        setRecentEvent('❌ Ningún equipo tiene Pares. Se pasa al lance de Juego.');
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          startLance('juego');
-        }, delays.transition);
-      } else if (t0Has && !t1Has) {
-        setRecentEvent('✅ Solo el Equipo Jugador tiene Pares (se cobrarán en el recuento). Se pasa a Juego.');
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          startLance('juego');
-        }, delays.transition);
-      } else if (!t0Has && t1Has) {
-        setRecentEvent('✅ Solo los Rivales tienen Pares (se cobrarán en el recuento). Se pasa a Juego.');
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          startLance('juego');
-        }, delays.transition);
-      } else {
-        // Both teams have pairs! Only players with declaredPares === true participate
-        const firstBettor = getNextEligibleBettorSeat(manoIndex, 'pares', updatedPlayers);
-        setRecentEvent(`⚔️ ¡Ambos equipos tienen Pares! Se abre el lance. Turno de ${updatedPlayers[firstBettor].name}.`);
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          setPhase('pares_bet');
-          setCurrentTurn(firstBettor);
-        }, delays.transition);
-      }
+      return;
     }
-  };
 
-  // Juego Declaration Handler
-  const handleDeclareJuego = (seat: number, hasJuego: boolean, customSpeech?: string) => {
-    const p = players[seat];
-    if (!p) return;
-    const speech = customSpeech || (hasJuego ? '¡Juego sí!' : 'Juego no.');
+    // Everybody has declared
+    const t0Has = updatedPlayers[0][field] === true || updatedPlayers[2][field] === true;
+    const t1Has = updatedPlayers[1][field] === true || updatedPlayers[3][field] === true;
+    setTransitioning(true);
+    const delays = getDelays();
 
-    if (hasJuego) sound.playEnvido(); else sound.playCard();
-    voiceEngine.speakCharacter(p.id, speech);
-    setRecentEvent(`${p.name} declara: «${speech}».`);
+    if (t0Has && t1Has) {
+      const firstBettor = getNextEligibleBettorSeat(manoIndex, kind, updatedPlayers);
+      setRecentEvent(`⚔️ ¡Ambos equipos tienen ${label}! Se abre el lance. Turno de ${updatedPlayers[firstBettor].name}.`);
+      safeTimeout(() => {
+        setTransitioning(false);
+        setPhase(kind === 'pares' ? 'pares_bet' : 'juego_bet');
+        setCurrentTurn(firstBettor);
+      }, delays.transition);
+      return;
+    }
 
-    const updatedPlayers = players.map((pl, idx) =>
-      idx === seat ? { ...pl, declaredJuego: hasJuego, currentSpeech: speech } : pl
+    if (kind === 'pares') {
+      setRecentEvent(
+        !t0Has && !t1Has
+          ? '❌ Ningún equipo tiene Pares. Se pasa al lance de Juego.'
+          : `✅ Solo ${t0Has ? 'el Equipo Jugador tiene' : 'los Rivales tienen'} Pares (se cobrarán en el recuento). Se pasa a Juego.`
+      );
+      safeTimeout(() => {
+        setTransitioning(false);
+        startLance('juego');
+      }, delays.transition);
+      return;
+    }
+
+    if (!t0Has && !t1Has) {
+      setRecentEvent('❌ Nadie tiene Juego (nadie llega a 31). ¡Se abre el lance al PUNTO!');
+      safeTimeout(() => {
+        setTransitioning(false);
+        startLance('punto');
+      }, delays.transition);
+      return;
+    }
+    setRecentEvent(
+      `✅ Solo ${t0Has ? 'el Equipo Jugador tiene' : 'los Rivales tienen'} Juego (se cobrará en el recuento). Fin de lances.`
     );
-    setPlayers(updatedPlayers);
-
-    const nextSeat = (seat + 1) % 4;
-    if (nextSeat !== manoIndex) {
-      setCurrentTurn(nextSeat);
-    } else {
-      // Full circle! Everyone declared Juego
-      const t0Has = updatedPlayers[0].declaredJuego === true || updatedPlayers[2].declaredJuego === true;
-      const t1Has = updatedPlayers[1].declaredJuego === true || updatedPlayers[3].declaredJuego === true;
-
-      isTransitioningRef.current = true;
-      const delays = getDelays();
-
-      if (!t0Has && !t1Has) {
-        setRecentEvent('❌ Nadie tiene Juego (nadie llega a 31). ¡Se abre el lance al PUNTO!');
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          setPhase('punto_bet');
-          setCurrentTurn(manoIndex);
-        }, delays.transition);
-      } else if (t0Has && !t1Has) {
-        setRecentEvent('✅ Solo el Equipo Jugador tiene Juego (se cobrará en el recuento). Fin de lances.');
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          resolveHand();
-        }, delays.transition);
-      } else if (!t0Has && t1Has) {
-        setRecentEvent('✅ Solo los Rivales tienen Juego (se cobrarán en el recuento). Fin de lances.');
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          resolveHand();
-        }, delays.transition);
-      } else {
-        // Both teams have juego! Only players with declaredJuego === true participate
-        const firstBettor = getNextEligibleBettorSeat(manoIndex, 'juego', updatedPlayers);
-        setRecentEvent(`⚔️ ¡Ambos equipos tienen Juego! Se abre el lance. Turno de ${updatedPlayers[firstBettor].name}.`);
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          setPhase('juego_bet');
-          setCurrentTurn(firstBettor);
-        }, delays.transition);
-      }
-    }
+    safeTimeout(() => {
+      setTransitioning(false);
+      resolveHand();
+    }, delays.transition);
   };
+
+  const handleDeclarePares = (seat: number, hasPairs: boolean, customSpeech?: string) =>
+    handleDeclaration('pares', seat, hasPairs, customSpeech);
+  const handleDeclareJuego = (seat: number, hasJuego: boolean, customSpeech?: string) =>
+    handleDeclaration('juego', seat, hasJuego, customSpeech);
 
   // Handle betting action from user or AI
   const executeBetAction = (
     seat: number,
-    action: 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero' | string,
+    action: string, // 'paso' | 'envido' | 'envido:N' | 'mas' | 'mas:N' | 'ordago' | 'quiero' | 'no_quiero'
     lanceKey: string
   ) => {
-    const actingPlayer = players[seat];
+    const table = playersRef.current.length ? playersRef.current : players;
+    // Hand the turn to whoever must answer a bet, or close the lance if nobody can
+    const passBetToOpponents = (fromSeat: number, team: 0 | 1, onYouMessage: string, otherMessage: string) => {
+      const nextSeat = getNextOpposingBettorSeat(fromSeat, team, lanceKey, table);
+      if (nextSeat === null) {
+        setTransitioning(true);
+        safeTimeout(() => {
+          setTransitioning(false);
+          advanceToNextLance(lanceKey);
+        }, getDelays().transition);
+        return;
+      }
+      setRecentEvent(nextSeat === 0 ? onYouMessage : otherMessage);
+      setCurrentTurn(nextSeat);
+    };
+    const actingPlayer = playersRef.current[seat] || players[seat];
+    if (!actingPlayer) return;
     const actingTeam = actingPlayer.team;
-    const currentBet = lanceBets[lanceKey];
+    const currentBet = lanceBetsRef.current[lanceKey] || lanceBets[lanceKey];
 
     if (action === 'ordago') {
       sound.playOrdago();
@@ -858,37 +1034,26 @@ export default function App() {
         [lanceKey]: {
           ...prev[lanceKey],
           currentBet: targetPiedras,
+          previousBet: currentBet.isOrdago ? currentBet.previousBet : currentBet.currentBet,
           isOrdago: true,
           lastBettorTeam: actingTeam,
           lastBettorIndex: seat,
         },
       }));
 
-      // Pass turn to opposing team (only eligible players with pairs/juego)
-      const nextSeat = getNextOpposingBettorSeat(seat, actingTeam, lanceKey, players);
-      if (nextSeat !== null) {
-        if (nextSeat === 0) {
-          setRecentEvent(`🔥 ¡${actingPlayer.name} HA CANTADO ÓRDAGO! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
-        }
-        setCurrentTurn(nextSeat);
-      } else {
-        isTransitioningRef.current = true;
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          advanceToNextLance(lanceKey);
-        }, getDelays().transition);
-      }
+      passBetToOpponents(
+        seat,
+        actingTeam,
+        `🔥 ¡${actingPlayer.name} HA CANTADO ÓRDAGO! Tienes la potestad de decidir: ¿Quieres o no quieres?`,
+        `🔥 ¡¡${actingPlayer.name} HA CANTADO ÓRDAGO!!`
+      );
       return;
     }
 
-    if (action === 'envido' || (typeof action === 'string' && action.startsWith('envido'))) {
+    if (action === 'envido' || action.startsWith('envido:')) {
       sound.playEnvido();
-      let stones = 2;
-      if (typeof action === 'string' && action.startsWith('envido:')) {
-        const parsed = parseInt(action.split(':')[1], 10);
-        if (!isNaN(parsed) && parsed >= 2) stones = parsed;
-      }
-
+      const parsed = action.startsWith('envido:') ? parseInt(action.split(':')[1], 10) : NaN;
+      const stones = !isNaN(parsed) && parsed >= 2 ? parsed : 2;
       setLanceBets((prev) => ({
         ...prev,
         [lanceKey]: {
@@ -899,60 +1064,37 @@ export default function App() {
           lastBettorIndex: seat,
         },
       }));
-
-      const nextSeat = getNextOpposingBettorSeat(seat, actingTeam, lanceKey, players);
-      if (nextSeat !== null) {
-        if (nextSeat === 0) {
-          setRecentEvent(`¡${actingPlayer.name} envida ${stones} piedras! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
-        } else {
-          setRecentEvent(`¡${actingPlayer.name} envida ${stones} piedras!`);
-        }
-        setCurrentTurn(nextSeat);
-      } else {
-        isTransitioningRef.current = true;
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          advanceToNextLance(lanceKey);
-        }, getDelays().transition);
-      }
+      passBetToOpponents(
+        seat,
+        actingTeam,
+        `¡${actingPlayer.name} envida ${stones} piedras! Tienes la potestad de decidir: ¿Quieres o no quieres?`,
+        `¡${actingPlayer.name} envida ${stones} piedras!`
+      );
       return;
     }
 
-    if (action === 'mas' || (typeof action === 'string' && action.startsWith('mas'))) {
+    if (action === 'mas' || action.startsWith('mas:')) {
       sound.playEnvido();
-      let added = 2;
-      if (typeof action === 'string' && action.startsWith('mas:')) {
-        const parsed = parseInt(action.split(':')[1], 10);
-        if (!isNaN(parsed) && parsed >= 2) added = parsed;
-      }
-      const previousAmount = currentBet.currentBet || 0;
-      const newBet = previousAmount + added;
+      const parsed = action.startsWith('mas:') ? parseInt(action.split(':')[1], 10) : NaN;
+      const added = !isNaN(parsed) && parsed >= 2 ? parsed : 2;
+      const base = currentBet.currentBet || 0;
+      const newBet = base + added;
       setLanceBets((prev) => ({
         ...prev,
         [lanceKey]: {
           ...prev[lanceKey],
           currentBet: newBet,
-          previousBet: previousAmount,
+          previousBet: base,
           lastBettorTeam: actingTeam,
           lastBettorIndex: seat,
         },
       }));
-
-      const nextSeat = getNextOpposingBettorSeat(seat, actingTeam, lanceKey, players);
-      if (nextSeat !== null) {
-        if (nextSeat === 0) {
-          setRecentEvent(`¡${actingPlayer.name} sube ${added} más (${newBet} piedras)! Tienes la potestad de decidir: ¿Quieres o no quieres?`);
-        } else {
-          setRecentEvent(`¡${actingPlayer.name} sube ${added} más! Total: ${newBet} piedras.`);
-        }
-        setCurrentTurn(nextSeat);
-      } else {
-        isTransitioningRef.current = true;
-        safeTimeout(() => {
-          isTransitioningRef.current = false;
-          advanceToNextLance(lanceKey);
-        }, getDelays().transition);
-      }
+      passBetToOpponents(
+        seat,
+        actingTeam,
+        `¡${actingPlayer.name} sube ${added} más (${newBet} piedras)! Tienes la potestad de decidir: ¿Quieres o no quieres?`,
+        `¡${actingPlayer.name} sube ${added} más! Total: ${newBet} piedras.`
+      );
       return;
     }
 
@@ -962,13 +1104,14 @@ export default function App() {
       if (currentBet.isOrdago) {
         setRecentEvent(`¡${actingPlayer.name} DICE QUIERO AL ÓRDAGO! ¡¡A VER LAS CARTAS!!`);
         setShowAllCards(true);
-        isTransitioningRef.current = true;
+        setTransitioning(true);
 
         safeTimeout(() => {
-          isTransitioningRef.current = false;
+          setTransitioning(false);
           // Instant resolution of Órdago on this lance!
-          const result = getWinningTeamForLance(lanceKey as any, players, manoIndex);
-          setRecentEvent(`¡El lance de ${lanceKey.toUpperCase()} lo gana ${players[result.winningPlayerIndex].name}!`);
+          const table = playersRef.current;
+          const result = getWinningTeamForLance(lanceKey as any, table, manoIndex);
+          setRecentEvent(`¡El lance de ${lanceKey.toUpperCase()} lo gana ${table[result.winningPlayerIndex].name}!`);
 
           if (result.winningTeam === 0) {
             triggerWin('¡VICTORIA POR ÓRDAGO DEL EQUIPO JUGADOR!');
@@ -991,10 +1134,10 @@ export default function App() {
       }));
 
       // Move to next lance
-      isTransitioningRef.current = true;
+      setTransitioning(true);
       const delays = getDelays();
       safeTimeout(() => {
-        isTransitioningRef.current = false;
+        setTransitioning(false);
         advanceToNextLance(lanceKey);
       }, delays.transition);
       return;
@@ -1004,8 +1147,9 @@ export default function App() {
       sound.playCard();
       // Team declined. The betting team immediately gets stones!
       const winningTeam = actingTeam === 0 ? 1 : 0;
-      // If was a raise or first bet: 1 stone for leaving initial bet, or previous amount
-      const award = currentBet.currentBet > 2 ? currentBet.currentBet - 2 : 1;
+      // Declining gives the bettors what was already accepted before the last raise, or 1 stone.
+      // (Before, declining an órdago gave targetPiedras - 2 stones and ended the game.)
+      const award = currentBet.previousBet && currentBet.previousBet > 0 ? currentBet.previousBet : 1;
       awardPiedras(winningTeam, award, `Retirada en ${lanceKey.toUpperCase()}`);
 
       setLanceBets((prev) => ({
@@ -1017,10 +1161,10 @@ export default function App() {
         },
       }));
 
-      isTransitioningRef.current = true;
+      setTransitioning(true);
       const delays = getDelays();
       safeTimeout(() => {
-        isTransitioningRef.current = false;
+        setTransitioning(false);
         advanceToNextLance(lanceKey);
       }, delays.transition);
       return;
@@ -1029,31 +1173,25 @@ export default function App() {
     if (action === 'paso') {
       sound.playCard();
       setRecentEvent(`${actingPlayer.name} pasa.`);
-
       const updatedHistory: BetHistoryItem[] = [
         ...currentBet.history,
         { playerIndex: seat, action: 'paso', text: 'Paso' },
       ];
-
       setLanceBets((prev) => ({
         ...prev,
-        [lanceKey]: {
-          ...prev[lanceKey],
-          history: updatedHistory,
-        },
+        [lanceKey]: { ...prev[lanceKey], history: updatedHistory },
       }));
 
-      const eligibleCount = players.filter((p) => isPlayerEligibleForLance(p, lanceKey)).length;
+      const eligibleCount = table.filter((p) => isPlayerEligibleForLance(p, lanceKey)).length;
       const passedCount = updatedHistory.filter((h) => h.action === 'paso').length;
-      const nextSeat = getNextEligibleBettorSeat((seat + 1) % 4, lanceKey, players);
-
-      // If all eligible players passed without any active bet:
+      const nextSeat = getNextEligibleBettorSeat((seat + 1) % 4, lanceKey, table);
+      // Everybody who can bet in this lance has passed
       if (passedCount >= eligibleCount || nextSeat === manoIndex) {
         setRecentEvent(`Lance de ${lanceKey.toUpperCase()} pasa en silencio (en blanco).`);
-        isTransitioningRef.current = true;
+        setTransitioning(true);
         const delays = getDelays();
         safeTimeout(() => {
-          isTransitioningRef.current = false;
+          setTransitioning(false);
           advanceToNextLance(lanceKey);
         }, delays.transition);
       } else {
@@ -1082,42 +1220,35 @@ export default function App() {
     sound.playChip();
     setRecentEvent(`+${count} piedras para ${team === 0 ? 'Equipo Jugador' : 'Rivales'} (${reason}).`);
 
-    if (team === 0) {
-      setScoreTeam0((prev) => {
-        if (prev.piedras >= targetPiedras || handWonRef.current) return prev;
-        const newP = prev.piedras + count;
-        if (newP >= targetPiedras) {
-          handWonRef.current = true;
-          triggerWin('¡Equipo Jugador ha alcanzado la meta de piedras!');
-          return { piedras: targetPiedras, juegosWon: prev.juegosWon + 1 };
-        }
-        return { ...prev, piedras: newP };
-      });
-    } else {
-      setScoreTeam1((prev) => {
-        if (prev.piedras >= targetPiedras || handWonRef.current) return prev;
-        const newP = prev.piedras + count;
-        if (newP >= targetPiedras) {
-          handWonRef.current = true;
-          triggerDefeat('¡Los Rivales han alcanzado la meta de piedras!');
-          return { piedras: targetPiedras, juegosWon: prev.juegosWon + 1 };
-        }
-        return { ...prev, piedras: newP };
-      });
+    const ref = team === 0 ? score0Ref : score1Ref;
+    const setScore = team === 0 ? setScoreTeam0 : setScoreTeam1;
+    const prev = ref.current;
+    const newP = prev.piedras + count;
+    if (newP >= targetPiedras) {
+      const finalScore = { piedras: targetPiedras, juegosWon: prev.juegosWon + 1 };
+      ref.current = finalScore;
+      setScore(finalScore);
+      handWonRef.current = true;
+      if (team === 0) triggerWin('¡Equipo Jugador ha alcanzado la meta de piedras!');
+      else triggerDefeat('¡Los Rivales han alcanzado la meta de piedras!');
+      return;
     }
+    const next = { ...prev, piedras: newP };
+    ref.current = next;
+    setScore(next);
   };
 
   // Showdown & Recuento de Tantos (Final Scoring)
   const resolveHand = () => {
     if (isScoringRef.current) return;
     isScoringRef.current = true;
-    isTransitioningRef.current = true;
+    setTransitioning(true);
 
     setPhase('scoring');
     setShowAllCards(true);
     setRecentEvent('¡A ver las cartas! Se procede al recuento tradicional de tantos paso a paso.');
 
-    const plan = computeHandRecountPlan(players, manoIndex, lanceBets);
+    const plan = computeHandRecountPlan(playersRef.current, manoIndex, lanceBetsRef.current);
     setRecountPlan(plan);
   };
 
@@ -1126,7 +1257,11 @@ export default function App() {
   };
 
   const handleFinishRecount = () => {
-    if (handWonRef.current) return;
+    if (handWonRef.current) {
+      setRecountPlan(null);
+      if (gameMode !== 'torneo') setPhase('game_over');
+      return;
+    }
     setRecountPlan(null);
     setPhase('round_end');
     setRecentEvent('Mano finalizada. Preparaos para la siguiente mano.');
@@ -1137,7 +1272,7 @@ export default function App() {
     clearAllPendingTimers();
     setRecountPlan(null);
     isScoringRef.current = false;
-    isTransitioningRef.current = false;
+    setTransitioning(false);
     const nextMano = (manoIndex + 1) % 4;
     dealNewHand(players, nextMano);
   };
@@ -1163,9 +1298,8 @@ export default function App() {
           current: idx === nextRound,
         }))
       );
-      setTimeout(() => {
-        setView('bracket');
-      }, 2500);
+      const timer = window.setTimeout(() => setView('bracket'), 2500);
+      pendingTimersRef.current.push(timer);
     } else {
       setPhase('game_over');
     }
@@ -1183,56 +1317,58 @@ export default function App() {
   };
 
   // Cameo trigger
+  const dismissCameo = React.useCallback(() => setCameo(null), []);
+
   const triggerCameo = (type: string) => {
     const list = CAMEOS[type] || CAMEOS.ordago;
     const randomCameo = list[Math.floor(Math.random() * list.length)];
     setCameo(randomCameo);
   };
 
-  // Handle Seña sent by user
-  const handleSendSeña = (seña: Seña, isTruthful: boolean) => {
+  // Handle Seña sent by user: your partner must be looking at you, and any rival looking will catch it
+  const handleSendSeña = (seña: Seña, _isTruthful: boolean = true) => {
+    if (!SEÑA_PHASES.includes(phaseRef.current) || showAllCardsRef.current) {
+      setRecentEvent('Ahora no es momento de pasar señas.');
+      return;
+    }
     sound.playSeña();
-    const partner = players[2];
-    const rival1 = players[1];
-    const rival2 = players[3];
+    const table = playersRef.current;
+    const currentGazes = gazesRef.current;
+    const partner = table[2];
+    const partnerLooking = currentGazes[2] === 0;
+    const watchers = [1, 3].filter((s) => currentGazes[s] === 0);
+    const label = señaShortLabel(seña.id);
 
-    // Show gesture tag above player
-    setPlayers((prev) =>
-      prev.map((p, i) => (i === 0 ? { ...p, lastGesture: seña.gesture } : p))
-    );
+    let nextIntel = intelRef.current;
+    if (partnerLooking) nextIntel = addIntel(nextIntel, 0, 0, seña.id);
+    if (watchers.length) nextIntel = addIntel(nextIntel, 1, 0, seña.id);
+    updateIntel(nextIntel);
 
-    // 25% chance a rival catches the seña!
-    const wasCaught = Math.random() < 0.28;
-
-    if (wasCaught) {
-      const catcher = Math.random() < 0.5 ? rival1 : rival2;
-      const catcherChar = PC_MUS_CHARACTERS.find((c) => c.id === catcher.id)!;
-      const quote = catcherChar.dialogs.señaSeen[0] || '¡Te he visto la seña!';
-
-      setTimeout(() => {
-        setPlayers((prev) =>
-          prev.map((p) => (p.id === catcher.id ? { ...p, currentSpeech: quote } : p))
-        );
-        voiceEngine.speakCharacter(catcher.id, quote);
-        setRecentEvent(`¡${catcher.name} ha pillado tu seña! «${quote}»`);
-      }, 600);
+    if (watchers.length) {
+      const catcher = watchers[0];
+      const quote = getSeenSeñaQuote(catcher);
+      window.setTimeout(() => {
+        sayBriefly(catcher, quote);
+        voiceEngine.speakCharacter(table[catcher].id, quote);
+      }, 500);
+      const names = watchers.map((w) => table[w].name).join(' y ');
+      setRecentEvent(
+        partnerLooking
+          ? `👁️ ¡${names} te ha pillado la seña «${label}»! Tu compañero también la ha visto.`
+          : `👁️ ¡${names} te ha pillado la seña «${label}» y tu compañero ni te miraba!`
+      );
+    } else if (partnerLooking) {
+      window.setTimeout(() => sayBriefly(2, '*(Entendido, compañero...)*'), 600);
+      setRecentEvent(`🤫 Seña limpia: ${partner?.name} sabe que llevas «${label}». Nadie más lo ha visto.`);
     } else {
-      // Partner understood the seña
-      setTimeout(() => {
-        setPlayers((prev) =>
-          prev.map((p) =>
-            p.seat === 2
-              ? { ...p, currentSpeech: '*(Entendido, compañero...)*' }
-              : p
-          )
-        );
-        setRecentEvent(`Tu compañero ${partner.name} ha captado tu seña.`);
-      }, 700);
+      setRecentEvent(`🙈 ${partner?.name} no te estaba mirando: la seña «${label}» se ha perdido.`);
     }
   };
 
   // User controls action dispatcher
   const handleUserAction = (action: string) => {
+    if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
+    if (action === 'discard' ? phase !== 'discarding' : currentTurn !== 0) return;
     const user = players[0];
     if (action === 'mus') {
       userProfileEngine.recordAction('mus');
@@ -1253,22 +1389,20 @@ export default function App() {
       );
       if (user) voiceEngine.speakCharacter(user.id, speech);
       setRecentEvent('¡Cortas el mus! No hay mus.');
-      isTransitioningRef.current = true;
+      setTransitioning(true);
       const delays = getDelays();
       safeTimeout(() => {
-        isTransitioningRef.current = false;
+        setTransitioning(false);
         startLance('grande');
       }, delays.transition);
     } else if (action === 'discard') {
       handleUserDiscard();
-    } else if (action === 'declare_pares_si') {
-      handleDeclarePares(0, true, '¡Pares sí!');
-    } else if (action === 'declare_pares_no') {
-      handleDeclarePares(0, false, 'Pares no.');
-    } else if (action === 'declare_juego_si') {
-      handleDeclareJuego(0, true, '¡Juego sí!');
-    } else if (action === 'declare_juego_no') {
-      handleDeclareJuego(0, false, 'Juego no.');
+    } else if (action === 'declare_pares_si' || action === 'declare_pares_no') {
+      if (phase !== 'pares_precheck') return;
+      handleUserPrecheckDeclaration(); // the app certifies the real cards
+    } else if (action === 'declare_juego_si' || action === 'declare_juego_no') {
+      if (phase !== 'juego_precheck') return;
+      handleUserPrecheckDeclaration();
     } else {
       // Betting action
       const lanceKey =
@@ -1303,7 +1437,7 @@ export default function App() {
         }
       }
       userProfileEngine.recordAction(
-        action as any,
+        (action.split(':')[0] as any),
         lanceKey,
         handStrength,
         currentBetState.isOrdago
@@ -1311,15 +1445,9 @@ export default function App() {
 
       let speech = 'Paso.';
       if (action === 'envido') speech = getCharacterLine(user?.id || 'tio_gil', 'envido') || '¡Envido dos piedras!';
-      if (typeof action === 'string' && action.startsWith('envido:')) {
-        const stones = action.split(':')[1];
-        speech = `¡Envido ${stones} piedras!`;
-      }
+      if (action.startsWith('envido:')) speech = `¡Envido ${action.split(':')[1]} piedras!`;
       if (action === 'mas') speech = '¡Dos más!';
-      if (typeof action === 'string' && action.startsWith('mas:')) {
-        const stones = action.split(':')[1];
-        speech = `¡${stones} más!`;
-      }
+      if (action.startsWith('mas:')) speech = `¡${action.split(':')[1]} más!`;
       if (action === 'ordago') speech = getCharacterLine(user?.id || 'tio_gil', 'ordago') || '¡¡ÓRDAGO!!';
       if (action === 'quiero') speech = getCharacterLine(user?.id || 'tio_gil', 'quiero') || '¡Quiero!';
       if (action === 'no_quiero') speech = getCharacterLine(user?.id || 'tio_gil', 'noQuiero') || 'No quiero.';
@@ -1350,13 +1478,19 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col justify-between selection:bg-amber-500 selection:text-stone-950">
+    <div className="min-h-screen text-stone-100 flex flex-col justify-between">
       {/* Retro CRT overlay & Top bar */}
       <RetroDosOverlay
         crtEnabled={crtEnabled}
         onToggleCrt={() => setCrtEnabled(!crtEnabled)}
         onOpenRules={() => setRulesOpen(true)}
-        onExitGame={() => setView('select')}
+        onExitGame={() => {
+          clearAllPendingTimers();
+          handWonRef.current = true; // stops AI turns and pending transitions
+          setRecountPlan(null);
+          setCameo(null);
+          setView('select');
+        }}
         onOpenMultiplayer={() => setView('multiplayer')}
         onOpenTutorial={() => setView('tutorial')}
         onOpenUserControl={() => setUserControlOpen(true)}
@@ -1370,7 +1504,7 @@ export default function App() {
       />
 
       {/* Cameo guest pop-up banner */}
-      <CameoBanner cameo={cameo} onDismiss={() => setCameo(null)} />
+      <CameoBanner cameo={cameo} onDismiss={dismissCameo} />
 
       {/* VIEW 1: CHARACTER & MODE SELECT */}
       {view === 'select' && (
@@ -1404,8 +1538,35 @@ export default function App() {
           currentRoundIndex={tournamentRound}
           matches={tournamentMatches}
           onContinueMatch={() => {
+            clearAllPendingTimers();
+            const match = tournamentMatches[tournamentRound];
+            const rivalChars = (match?.rivals || [])
+              .map((name) => PC_MUS_CHARACTERS.find((c) => c.name === name))
+              .filter((c): c is CharacterInfo => !!c);
+            const matchPlayers = players.map((p) => {
+              if (p.team !== 1 || rivalChars.length < 2) return p;
+              const char = rivalChars[p.seat === 1 ? 0 : 1];
+              return {
+                ...p,
+                id: char.id,
+                name: char.name,
+                realName: char.realName,
+                quote: char.presentation,
+                avatarColor: char.visual.bgColor,
+                avatarIcon: char.visual.emoji,
+                description: char.description,
+                aggressiveness: char.aggressiveness,
+                bluffRate: char.bluffRate,
+              };
+            });
+            const zero = { piedras: 0, juegosWon: 0 };
+            score0Ref.current = zero;
+            score1Ref.current = zero;
+            setScoreTeam0(zero);
+            setScoreTeam1(zero);
+            setPlayers(matchPlayers);
             setView('game');
-            dealNewHand(players, 0);
+            dealNewHand(matchPlayers, 0);
           }}
           onResetTournament={() => {
             setTournamentRound(0);
@@ -1488,62 +1649,16 @@ export default function App() {
                 prev === 'tranquilo' ? 'normal' : prev === 'normal' ? 'rapido' : 'tranquilo'
               )
             }
-            controlsNode={
-              phase !== 'round_end' && phase !== 'game_over' ? (
-                <Controls
-                  isPlayerTurn={currentTurn === 0}
-                  phase={phase}
-                  currentLanceName={activeLanceName}
-                  betState={currentBetState}
-                  selectedCardCount={players[0]?.selectedToDiscard?.length || 0}
-                  onAction={handleUserAction}
-                  onOpenSeñas={() => setSeñasOpen(true)}
-                  waitingMessage={
-                    players[currentTurn]
-                      ? phase === 'pares_bet' && !players[0]?.declaredPares
-                        ? `Turno de ${players[currentTurn].name}. (Sin pares: tu compañero defiende a tu pareja)`
-                        : phase === 'juego_bet' && !players[0]?.declaredJuego
-                        ? `Turno de ${players[currentTurn].name}. (Sin juego: tu compañero defiende a tu pareja)`
-                        : `Turno de ${players[currentTurn].name}...`
-                      : null
-                  }
-                  userHasPares={players[0]?.hasPares}
-                  userParesType={
-                    players[0]?.cards ? describeParesHand(players[0].cards).title : undefined
-                  }
-                  userParesDetail={
-                    players[0]?.cards ? describeParesHand(players[0].cards).detail : undefined
-                  }
-                  userHasJuego={players[0]?.hasJuego}
-                  userJuegoSum={players[0]?.cards ? getHandSum(players[0].cards) : undefined}
-                  userJuegoDetail={
-                    players[0]?.cards ? describeJuegoHand(players[0].cards).detail : undefined
-                  }
-                />
-              ) : (
-                <div className="bg-stone-900/95 border-2 border-amber-500 rounded-2xl p-2.5 text-center shadow-xl w-full max-w-[320px]">
-                  <h3 className="font-serif font-black text-xs sm:text-sm text-amber-300 mb-0.5">
-                    {phase === 'game_over' ? '¡PARTIDA CONCLUIDA!' : '¡MANO COMPLETADA!'}
-                  </h3>
-                  <p className="text-[10px] text-stone-300 mb-2 truncate">{recentEvent}</p>
-                  {phase === 'round_end' ? (
-                    <button
-                      onClick={handleNextHand}
-                      className="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
-                    >
-                      Repartir Siguiente Mano
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setView('select')}
-                      className="w-full py-1.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
-                    >
-                      Volver al Menú Principal
-                    </button>
-                  )}
-                </div>
-              )
-            }
+            gazes={gazes}
+            intel={intel}
+            onSetHumanGaze={(t) => {
+              const next = [...gazesRef.current] as GazeTarget[];
+              next[0] = t;
+              updateGazes(next);
+            }}
+            validSeñas={getValidSeñas(players[0]?.cards || [])}
+            señasEnabled={SEÑA_PHASES.includes(phase) && !showAllCards}
+            onQuickSeña={(seña) => handleSendSeña(seña, true)}
           />
 
           {/* Recuento Tradicional de Tantos (Paso a paso, animado y pausado) */}
@@ -1558,6 +1673,56 @@ export default function App() {
               onLancePointsAwarded={handleLancePointsAwarded}
               onFinishRecount={handleFinishRecount}
             />
+          )}
+
+          {/* Player controls & status bar */}
+          {phase !== 'round_end' && phase !== 'game_over' ? (
+            <Controls
+              isPlayerTurn={currentTurn === 0 && !isTransitioning}
+              phase={phase}
+              currentLanceName={activeLanceName}
+              betState={currentBetState}
+              selectedCardCount={players[0]?.selectedToDiscard?.length || 0}
+              onAction={handleUserAction}
+              onOpenSeñas={() => setSeñasOpen(true)}
+              waitingMessage={
+                players[currentTurn]
+                  ? phase === 'pares_bet' && !players[0]?.declaredPares
+                    ? `Turno de ${players[currentTurn].name}. (Sin pares: tu compañero defiende a tu pareja)`
+                    : phase === 'juego_bet' && !players[0]?.declaredJuego
+                    ? `Turno de ${players[currentTurn].name}. (Sin juego: tu compañero defiende a tu pareja)`
+                    : `Turno de ${players[currentTurn].name}...`
+                  : null
+              }
+              userHasPares={players[0]?.hasPares}
+              userParesType={players[0]?.cards?.length === 4 ? describeParesHand(players[0].cards).title : undefined}
+              userParesDetail={players[0]?.cards?.length === 4 ? describeParesHand(players[0].cards).detail : undefined}
+              userHasJuego={players[0]?.hasJuego}
+              userJuegoSum={players[0]?.cards?.length === 4 ? getHandSum(players[0].cards) : undefined}
+              userJuegoDetail={players[0]?.cards?.length === 4 ? describeJuegoHand(players[0].cards).detail : undefined}
+            />
+          ) : (
+            <div className="bg-stone-900 border-2 border-amber-500 rounded-2xl p-4 max-w-md mx-auto text-center shadow-2xl my-2">
+              <h3 className="font-serif font-black text-lg text-amber-300 mb-1">
+                {phase === 'game_over' ? '¡PARTIDA CONCLUIDA!' : '¡MANO COMPLETADA!'}
+              </h3>
+              <p className="text-xs text-stone-300 mb-3">{recentEvent}</p>
+              {phase === 'round_end' ? (
+                <button
+                  onClick={handleNextHand}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-lg transition active:scale-95"
+                >
+                  Repartir Siguiente Mano
+                </button>
+              ) : (
+                <button
+                  onClick={() => setView('select')}
+                  className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-sm shadow-lg transition active:scale-95"
+                >
+                  Volver al Menú Principal
+                </button>
+              )}
+            </div>
           )}
         </main>
       )}

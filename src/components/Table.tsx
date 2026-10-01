@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Player, LancePhase, LanceBetState, TeamScore } from '../types';
-import { SeatedPlayer } from './SeatedPlayer';
+import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
+import { Player, LancePhase, LanceBetState, TeamScore, Seña, Card } from '../types';
+import { GazeTarget, IntelState, SEAT_NAMES, señaShortLabel } from '../gazeSystem';
+import { SeatedPlayer, DeclarationChip } from './SeatedPlayer';
 import { CartoonPlayerHands } from './CartoonPlayerHands';
 import { CharacterAvatar } from './CharacterAvatar';
+import { FournierCard } from './FournierCard';
 import { UserProfile } from '../userProfileEngine';
 import tabernaLimpiaImg from '../assets/images/taberna_madrid_limpia_1790674574086.jpg';
 
@@ -22,8 +24,77 @@ interface TableProps {
   activeUser?: UserProfile;
   gameSpeed?: 'tranquilo' | 'normal' | 'rapido';
   onChangeGameSpeed?: () => void;
-  controlsNode?: React.ReactNode;
+  gazes?: GazeTarget[]; // gaze target per seat
+  intel?: IntelState;
+  onSetHumanGaze?: (target: GazeTarget) => void;
+  validSeñas?: Seña[];
+  señasEnabled?: boolean;
+  onQuickSeña?: (seña: Seña) => void;
 }
+
+type Point = { x: number; y: number };
+
+// Realistic 3D garbanzo / amarraco
+const Garbanzo: React.FC<{ amarraco?: boolean; style?: React.CSSProperties }> = ({ amarraco = false, style }) => (
+  <div
+    style={style}
+    className={`absolute rounded-full border border-stone-950/80 shadow-[1px_2px_3px_rgba(0,0,0,0.7)] ${
+      amarraco
+        ? 'w-4 h-4 sm:w-[18px] sm:h-[18px] bg-[radial-gradient(circle_at_35%_30%,#fde68a,#d97706_55%,#78350f)]'
+        : 'w-3 h-3 sm:w-3.5 sm:h-3.5 bg-[radial-gradient(circle_at_35%_30%,#fef3c7,#e0b26a_55%,#8a5a1c)]'
+    }`}
+    title={amarraco ? 'Amarraco (5 piedras)' : 'Piedra'}
+  />
+);
+
+// Deterministic scatter so stones don't jump around between renders
+const scatter = (i: number, radius: number) => {
+  const angle = i * 2.399963; // golden angle
+  const r = radius * Math.sqrt((i + 0.5) / 14);
+  return { left: `calc(50% + ${(Math.cos(angle) * r).toFixed(1)}px)`, top: `calc(50% + ${(Math.sin(angle) * r).toFixed(1)}px)` };
+};
+
+// A pile of stones on the felt (amarracos of 5 + loose piedras)
+const StonePile: React.FC<{ count: number; radius?: number; className?: string; title?: string }> = ({
+  count,
+  radius = 22,
+  className = '',
+  title,
+}) => {
+  const amarracos = Math.min(6, Math.floor(count / 5));
+  const singles = Math.min(10, count % 5 + (count >= 35 ? 5 : 0));
+  const items = [...Array(amarracos).fill(true), ...Array(singles).fill(false)];
+  return (
+    <div className={`absolute w-14 h-14 -translate-x-1/2 -translate-y-1/2 ${className}`} title={title}>
+      {items.map((am, i) => (
+        <Garbanzo key={i} amarraco={am} style={{ ...scatter(i, radius), transform: 'translate(-50%,-50%)' }} />
+      ))}
+    </div>
+  );
+};
+
+// Cards lying face down in front of a seat, rotated towards that player
+const CardFan: React.FC<{ cards: Card[]; rotation: number; showAllCards: boolean }> = ({
+  cards,
+  rotation,
+  showAllCards,
+}) => (
+  <div className="flex items-center justify-center -space-x-8 sm:-space-x-7" style={{ transform: `rotate(${rotation}deg)` }}>
+    {cards.map((card, idx) => (
+      <div
+        key={card.id || idx}
+        style={{ transform: `rotate(${[-9, -3, 3, 9][idx] || 0}deg) translateY(${[3, 0, 0, 3][idx] || 0}px)` }}
+      >
+        <FournierCard
+          card={card}
+          hidden={!showAllCards}
+          size="sm"
+          className="shadow-[0_3px_6px_rgba(0,0,0,0.65)] border border-stone-950"
+        />
+      </div>
+    ))}
+  </div>
+);
 
 export const Table: React.FC<TableProps> = ({
   players,
@@ -36,13 +107,61 @@ export const Table: React.FC<TableProps> = ({
   recentEvent,
   scoreTeam0,
   scoreTeam1,
-  targetPiedras,
   onOpenUserControl,
   activeUser,
   gameSpeed = 'tranquilo',
   onChangeGameSpeed,
-  controlsNode,
+  gazes = [-1, -1, -1, -1],
+  intel = [{}, {}],
+  onSetHumanGaze,
+  validSeñas = [],
+  señasEnabled = false,
+  onQuickSeña,
 }) => {
+  // Head positions (relative to the table container) to draw the lines of sight
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const headEls = useRef<(HTMLDivElement | null)[]>([null, null, null, null]);
+  const [headPoints, setHeadPoints] = useState<(Point | null)[]>([null, null, null, null]);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
+  const [, setResizeTick] = useState(0);
+
+  useEffect(() => {
+    const onResize = () => setResizeTick((t) => t + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const base = container.getBoundingClientRect();
+    const pts = headEls.current.map((el): Point | null => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left - base.left + r.width / 2, y: r.top - base.top + r.height / 2 };
+    });
+    const same =
+      pts.every((p, i) => {
+        const q = headPoints[i];
+        if (!p || !q) return p === q;
+        return Math.abs(p.x - q.x) < 2 && Math.abs(p.y - q.y) < 2;
+      }) &&
+      Math.abs(base.width - size.w) < 2 &&
+      Math.abs(base.height - size.h) < 2;
+    if (!same) {
+      setHeadPoints(pts);
+      setSize({ w: base.width, h: base.height });
+    }
+  });
+
+  const setHeadRef = (seat: number) => (el: HTMLDivElement | null) => {
+    headEls.current[seat] = el;
+  };
+
+  const intelYourTeam = intel[0] || {};
+  const intelRivals = intel[1] || {};
+  const humanGaze = gazes[0] ?? -1;
+
   const isDiscardPhase = phase === 'discarding';
   const pSouth = players[0];
   const pEast = players[1];
@@ -55,608 +174,401 @@ export const Table: React.FC<TableProps> = ({
   // Active dialogue across any player
   const activeSpeakingPlayer = players.find((p) => !!p.currentSpeech);
 
-  const team0Piedras = scoreTeam0?.piedras || 0;
-  const team1Piedras = scoreTeam1?.piedras || 0;
-  const target = targetPiedras || 40;
+  const seatProps = (seat: 1 | 2 | 3) => ({
+    seatIndex: seat,
+    isMano: manoIndex === seat,
+    gaze: gazes[seat] ?? -1,
+    isWatchedByYou: humanGaze === seat,
+    knownByYourTeam: intelYourTeam[seat] || [],
+    knowsYourSeñas: seat === 2 ? [] : intelRivals[0] || [],
+    onWatch: onSetHumanGaze ? () => onSetHumanGaze(humanGaze === seat ? -1 : seat) : undefined,
+    headRef: setHeadRef(seat),
+  });
 
-  // Realistic Platillo de Piedras / Tanteo Tray sitting directly on the table felt
-  const renderPlatillo = (
-    teamName: string,
-    isUserTeam: boolean,
-    piedras: number,
-    targetVal: number
-  ) => {
-    const amarracos = Math.floor(piedras / 5);
-    const sueltas = piedras % 5;
+  // Where the deck rests: in front of the mano
+  const deckPosition = (
+    {
+      0: 'left-1/2 bottom-[17%] -translate-x-1/2',
+      1: 'right-[22%] top-[62%]',
+      2: 'left-1/2 top-[19%] -translate-x-1/2',
+      3: 'left-[22%] top-[62%]',
+    } as Record<number, string>
+  )[manoIndex];
 
-    return (
-      <div
-        className={`rounded-2xl border-2 p-2 sm:p-2.5 flex flex-col items-center justify-between shadow-2xl backdrop-blur-xs select-none transition-all duration-300 w-[125px] sm:w-[155px] shrink-0 z-20 ${
-          isUserTeam
-            ? 'bg-gradient-to-b from-[#2a1708]/95 via-[#1c0f04]/95 to-[#120a02]/95 border-emerald-500/80 shadow-[0_8px_20px_rgba(0,0,0,0.85),inset_0_2px_8px_rgba(16,185,129,0.3)]'
-            : 'bg-gradient-to-b from-[#2a1708]/95 via-[#1c0f04]/95 to-[#120a02]/95 border-rose-500/80 shadow-[0_8px_20px_rgba(0,0,0,0.85),inset_0_2px_8px_rgba(244,63,94,0.3)]'
-        }`}
-        title={`Platillo de piedras en la mesa - ${teamName}: ${piedras} de ${targetVal} piedras`}
-      >
-        {/* Header with team tag & stones tally */}
-        <div className="w-full flex items-center justify-between gap-1 pb-1 border-b border-amber-900/60 font-mono text-[9px] sm:text-[10px]">
-          <span
-            className={`font-black uppercase tracking-wider flex items-center gap-1 ${
-              isUserTeam ? 'text-emerald-400' : 'text-rose-400'
-            }`}
-          >
-            <span>{isUserTeam ? '🟢' : '🔴'}</span>
-            <span className="truncate max-w-[70px] sm:max-w-[95px]">{teamName}</span>
-          </span>
-          <span className="font-mono font-black text-amber-300 text-xs sm:text-sm bg-black/75 px-1.5 py-0.2 rounded border border-amber-500/40 shadow-xs">
-            {piedras}
-            <span className="text-[8.5px] text-stone-400 font-normal">/{targetVal}</span>
-          </span>
-        </div>
-
-        {/* Dish Basin with tactile 3D Chips / Stones */}
-        <div className="w-full my-1 py-1 px-1 rounded-xl bg-gradient-to-b from-[#081e0f] via-[#0a2613] to-[#041208] border border-emerald-900/70 shadow-inner flex flex-col items-center justify-center min-h-[46px] gap-1">
-          <div className="flex items-center gap-1.5 flex-wrap justify-center">
-            {/* Amarracos (Fichas doradas metálicas = 5 piedras cada una) */}
-            {amarracos > 0 && (
-              <div
-                className="flex items-center gap-0.5"
-                title={`${amarracos} amarraco(s) = ${amarracos * 5} piedras`}
-              >
-                <span className="text-[9px] font-mono font-black text-amber-300">
-                  {amarracos}x
-                </span>
-                <div className="flex items-center -space-x-1">
-                  {[...Array(Math.min(amarracos, 6))].map((_, i) => (
-                    <div
-                      key={`am_${i}`}
-                      className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-gradient-to-br from-yellow-200 via-amber-400 to-amber-700 border border-yellow-200 shadow-[1px_2px_4px_rgba(0,0,0,0.8)] relative flex items-center justify-center text-[9px] font-black text-stone-950 font-mono select-none"
-                    >
-                      <span>5</span>
-                      <div className="absolute top-0.5 left-0.5 w-1 h-1 rounded-full bg-white opacity-80 pointer-events-none" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Piedras sueltas (Fichas de hueso/marfil = 1 piedra cada una) */}
-            {sueltas > 0 && (
-              <div
-                className="flex items-center gap-0.5"
-                title={`${sueltas} piedra(s) suelta(s) = ${sueltas} piedras`}
-              >
-                <span className="text-[9px] font-mono font-black text-stone-300">
-                  {sueltas}x
-                </span>
-                <div className="flex items-center -space-x-1">
-                  {[...Array(sueltas)].map((_, i) => (
-                    <div
-                      key={`su_${i}`}
-                      className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-gradient-to-br from-stone-100 via-stone-300 to-stone-500 border border-white shadow-[1px_2px_4px_rgba(0,0,0,0.8)] relative flex items-center justify-center text-[8px] font-black text-stone-900 font-mono select-none"
-                    >
-                      <span>1</span>
-                      <div className="absolute top-0.5 left-0.5 w-0.5 h-0.5 rounded-full bg-white opacity-90 pointer-events-none" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {amarracos === 0 && sueltas === 0 && (
-              <span className="text-[8.5px] text-stone-500 font-mono italic">
-                0 piedras
-              </span>
-            )}
-          </div>
-
-          {/* Legend */}
-          <div className="text-[7.5px] sm:text-[8px] text-stone-400 font-mono flex items-center gap-1 leading-none">
-            <span className="text-amber-300 font-bold">
-              {amarracos} am.
-            </span>
-            <span>•</span>
-            <span className="text-stone-300 font-bold">
-              {sueltas} p.
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const potStones = betState.isOrdago ? 14 : betState.currentBet;
 
   return (
-    <div className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col justify-between flex-1 min-h-[560px] sm:min-h-[620px]">
-      {/* 1. TAVERN BAR BACKGROUND (Clean wallpaper, no UI, no bottom settings/icons) */}
+    <div
+      ref={containerRef}
+      className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col"
+    >
+      {/* 1. TAVERN BACKGROUND */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <img
           src={tabernaLimpiaImg}
           alt="Taberna Tradicional PC Mus"
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover object-top pointer-events-none transition-all duration-700"
+          className="w-full h-full object-cover object-top pointer-events-none transition-all duration-700 blur-[1.5px] scale-105"
         />
-        {/* Warm nighttime lighting vignette */}
         <div
           className={`absolute inset-0 pointer-events-none transition-colors duration-500 ${
             isNight
-              ? 'bg-gradient-to-t from-stone-950/85 via-amber-950/20 to-black/50'
-              : 'bg-gradient-to-t from-stone-950/60 via-transparent to-black/30'
+              ? 'bg-gradient-to-t from-stone-950/90 via-amber-950/35 to-black/60'
+              : 'bg-gradient-to-t from-stone-950/65 via-black/10 to-black/35'
           }`}
         />
+        {/* Warm pool of light from the lamp hanging over the table */}
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_45%_55%_at_50%_48%,rgba(255,196,110,0.22),transparent_70%)]" />
       </div>
 
-      {/* TOP UTILITY BAR (Controls on sides, clean space in center) */}
-      <div className="relative z-30 flex items-center justify-between px-3 pt-2">
+      {/* LINES OF SIGHT: who is looking at whom (red when someone is watching you) */}
+      <svg
+        className="absolute inset-0 z-[35] pointer-events-none"
+        width={size.w}
+        height={size.h}
+        viewBox={`0 0 ${size.w} ${size.h}`}
+      >
+        {gazes.map((target, seat) => {
+          const from = headPoints[seat];
+          if (!from || target === -1) return null;
+          const to = headPoints[target];
+          if (!to) return null;
+          const watchingYou = target === 0;
+          const isHuman = seat === 0;
+          const color = isHuman ? '#38bdf8' : watchingYou ? '#f43f5e' : seat % 2 === 0 ? '#34d399' : '#fb7185';
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const end = { x: to.x - (dx / len) * 34, y: to.y - (dy / len) * 34 };
+          const start = { x: from.x + (dx / len) * 30, y: from.y + (dy / len) * 30 };
+          return (
+            <g key={seat}>
+              <line
+                x1={start.x}
+                y1={start.y}
+                x2={end.x}
+                y2={end.y}
+                stroke={color}
+                strokeWidth={watchingYou || isHuman ? 2.5 : 1.5}
+                strokeDasharray="6 5"
+                strokeOpacity={watchingYou || isHuman ? 0.9 : 0.5}
+              >
+                <animate attributeName="stroke-dashoffset" from="22" to="0" dur="0.9s" repeatCount="indefinite" />
+              </line>
+              <circle cx={end.x} cy={end.y} r={3.5} fill={color} fillOpacity={0.9} />
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* 2. HUD (outside the table): settings · current lance & bet · AI profile */}
+      <div className="relative z-40 flex flex-wrap items-center justify-between gap-1.5 px-2 sm:px-3 pt-2">
         <div className="flex items-center gap-1.5">
-          {/* 🌙 Atmósfera de Noche Toggle Pill */}
           <button
             type="button"
             onClick={() => setIsNight(!isNight)}
-            className="px-3 py-1 rounded-full bg-stone-950/85 hover:bg-stone-900 border border-amber-500/70 hover:border-amber-400 text-amber-200 font-mono text-[10px] sm:text-xs flex items-center gap-1.5 shadow-xl transition transform hover:scale-105 cursor-pointer"
-            title="Cambiar atmósfera de iluminación (Noche de taberna tradicional / Tarde)"
+            className="px-2.5 py-1 rounded-full bg-stone-950/85 hover:bg-stone-900 border border-amber-500/70 text-amber-200 font-mono text-[10px] sm:text-xs shadow-xl transition cursor-pointer"
+            title="Cambiar atmósfera de iluminación"
           >
-            <span>{isNight ? '🌙 Noche' : '☀️ Tarde'}</span>
+            {isNight ? '🌙' : '☀️'}
+            <span className="hidden sm:inline"> {isNight ? 'Noche' : 'Tarde'}</span>
           </button>
-
-          {/* ⏱ Ritmo de Partida Toggle Pill */}
           {onChangeGameSpeed && (
             <button
               type="button"
               onClick={onChangeGameSpeed}
-              className="px-3 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 hover:border-amber-400 text-amber-300 font-mono text-[10px] sm:text-xs flex items-center gap-1.5 shadow-xl transition transform hover:scale-105 cursor-pointer"
-              title="Cambiar velocidad de la partida y del recuento de tantos (Pausado / Normal / Rápido)"
+              className="px-2.5 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 text-amber-300 font-mono text-[10px] sm:text-xs shadow-xl transition cursor-pointer"
+              title="Cambiar velocidad de la partida"
             >
-              <span>{gameSpeed === 'tranquilo' ? '🐢' : gameSpeed === 'normal' ? '⚖️' : '⚡'}</span>
-              <span className="capitalize">{gameSpeed === 'tranquilo' ? 'Pausado' : gameSpeed}</span>
+              {gameSpeed === 'tranquilo' ? '🐢' : gameSpeed === 'normal' ? '⚖️' : '⚡'}
+              <span className="hidden sm:inline capitalize"> {gameSpeed === 'tranquilo' ? 'Pausado' : gameSpeed}</span>
             </button>
           )}
         </div>
 
-        {/* 💬 RECOLOCATED DIALOGUE TICKER (Clean banner at top center, never blocking players) */}
-        {activeSpeakingPlayer && activeSpeakingPlayer.currentSpeech ? (
-          <div className="mx-2 bg-stone-950/95 border-2 border-amber-400 text-amber-100 px-3 py-1 rounded-full text-xs font-mono font-bold shadow-2xl flex items-center gap-2 max-w-sm sm:max-w-md animate-fade-in pointer-events-none">
-            <span className="text-amber-400 font-serif font-black shrink-0">
-              💬 {activeSpeakingPlayer.name}:
-            </span>
-            <span className="text-white font-mono truncate">
-              "{activeSpeakingPlayer.currentSpeech}"
-            </span>
+        <div className="flex items-center gap-1.5 order-last sm:order-none w-full sm:w-auto justify-center">
+          <div className="bg-blue-950/90 border-2 border-yellow-400 px-3 py-0.5 rounded-xl shadow-lg text-center">
+            <span className="text-[8px] uppercase tracking-widest text-amber-200 font-mono font-black mr-1.5">Lance</span>
+            <span className="text-xs sm:text-sm uppercase text-white font-serif font-black">{currentLanceName}</span>
           </div>
-        ) : recentEvent ? (
-          <div className="mx-2 bg-black/60 border border-amber-500/30 text-amber-200/90 px-3 py-1 rounded-full text-[11px] font-mono shadow truncate max-w-xs sm:max-w-sm">
-            {recentEvent}
-          </div>
-        ) : (
-          <div className="h-6" />
-        )}
+          {betState.currentBet > 0 && (
+            <div className="bg-amber-400 text-stone-950 px-2.5 py-0.5 rounded-full border-2 border-stone-950 font-mono font-black text-[10px] sm:text-xs shadow flex items-center gap-1">
+              {betState.isOrdago ? '🔥 ÓRDAGO' : `🪙 ${betState.currentBet} piedras`}
+              {betState.accepted && (
+                <span className="bg-emerald-700 text-white text-[8px] px-1 rounded uppercase">Quiero</span>
+              )}
+            </div>
+          )}
+        </div>
 
-        {/* 🧠 IA Adaptativa & Control de Usuarios Indicator Button */}
         {onOpenUserControl && (
           <button
             type="button"
             onClick={onOpenUserControl}
-            className="px-3 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 hover:border-amber-400 text-amber-300 font-mono text-[10px] sm:text-xs flex items-center gap-1.5 shadow-xl transition transform hover:scale-105 cursor-pointer"
+            className="px-2.5 py-1 rounded-full bg-stone-950/90 hover:bg-stone-900 border border-amber-500/80 text-amber-300 font-mono text-[10px] sm:text-xs shadow-xl transition cursor-pointer flex items-center gap-1"
             title="Abrir panel de control de usuarios y análisis táctico de la IA"
           >
-            <span>🧠 IA Adaptada:</span>
-            <span className="text-white font-bold max-w-[80px] sm:max-w-[120px] truncate">
-              {activeUser?.name || 'Tú'}
-            </span>
+            🧠<span className="hidden sm:inline">IA:</span>
+            <span className="text-white font-bold max-w-[70px] sm:max-w-[110px] truncate">{activeUser?.name || 'Tú'}</span>
           </button>
         )}
       </div>
 
-      {/* 2. NORTH SEATED PLAYER (Center-Top across table - Fully Visible) */}
-      <div className="relative z-30 pt-1 flex justify-center">
-        {pNorth && (
-          <SeatedPlayer
-            player={pNorth}
-            seatPosition="north"
-            seatIndex={2}
-            isMano={manoIndex === 2}
-            showAllCards={showAllCards}
-          />
-        )}
+      {/* 3. DIALOGUE / EVENT TICKER (outside the table, never covering it) */}
+      <div className="relative z-40 flex justify-center px-2 pt-1.5 min-h-[30px]">
+        {activeSpeakingPlayer && activeSpeakingPlayer.currentSpeech ? (
+          <div className="bg-stone-950/95 border-2 border-amber-400 text-amber-100 px-3 py-0.5 rounded-full text-[11px] sm:text-xs font-mono font-bold shadow-2xl flex items-center gap-2 max-w-full pointer-events-none">
+            <span className="text-amber-400 font-serif font-black shrink-0">💬 {activeSpeakingPlayer.name}:</span>
+            <span className="text-white truncate">"{activeSpeakingPlayer.currentSpeech}"</span>
+          </div>
+        ) : recentEvent ? (
+          <div className="bg-black/65 border border-amber-500/30 text-amber-200/90 px-3 py-0.5 rounded-full text-[10px] sm:text-[11px] font-mono shadow truncate max-w-full">
+            {recentEvent}
+          </div>
+        ) : null}
       </div>
 
-      {/* 3. THE OVAL WOODEN TABLE & WEST/EAST PLAYERS */}
-      <div className="relative z-20 flex-1 flex items-center justify-between px-2 sm:px-4 my-1">
-        {/* WEST SEATED PLAYER (Left - Fully Visible) */}
-        <div className="relative z-30 flex-shrink-0">
-          {pWest && (
-            <SeatedPlayer
-              player={pWest}
-              seatPosition="west"
-              seatIndex={3}
-              isMano={manoIndex === 3}
-              showAllCards={showAllCards}
-            />
-          )}
+      {/* 4. THE ROOM: West | (North + vertical table) | East */}
+      <div className="relative z-20 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0.5 sm:gap-2 px-1 sm:px-4 pt-1">
+        {/* WEST */}
+        <div className="flex justify-end">
+          {pWest && <SeatedPlayer player={pWest} seatPosition="west" {...seatProps(3)} />}
         </div>
 
-        {/* GRAND OVAL SPANISH TAVERN TABLE WITH TAPETE VERDE */}
-        <div className="flex-1 mx-1.5 sm:mx-3 h-full min-h-[190px] sm:min-h-[220px] rounded-[50px] sm:rounded-[80px] border-[6px] sm:border-[8px] border-[#381907] bg-gradient-to-b from-[#4a240d] via-[#2f1506] to-[#1a0a02] shadow-[inset_0_4px_30px_rgba(0,0,0,0.85),0_15px_30px_rgba(0,0,0,0.9)] relative p-2 sm:p-3 flex flex-col justify-between overflow-hidden">
-          {/* TAPETE VERDE DE PAÑO DE MUS (Traditional Green Baize Felt) */}
-          <div className="absolute inset-2 sm:inset-3 rounded-[40px] sm:rounded-[68px] border-2 border-amber-600/40 bg-gradient-to-b from-[#134e2b] via-[#155e34] to-[#0f3c21] shadow-[inset_0_3px_20px_rgba(0,0,0,0.7)] overflow-hidden pointer-events-none">
-            {/* Subtle felt baize weave */}
+        {/* CENTER COLUMN */}
+        <div className="flex flex-col items-center">
+          {pNorth && (
+            <div className="relative z-10 -mb-3">
+              <SeatedPlayer player={pNorth} seatPosition="north" {...seatProps(2)} />
+            </div>
+          )}
+
+          {/* VERTICAL MUS TABLE: wooden rail + green baize, slightly tilted for perspective */}
+          <div className="relative" style={{ perspective: '900px' }}>
+            {/* Floor shadow */}
+            <div className="absolute -inset-x-4 -bottom-5 h-16 rounded-[50%] bg-black/60 blur-xl" />
             <div
-              className="absolute inset-0 opacity-10"
+              className="relative w-[min(44vw,210px)] sm:w-[270px] md:w-[310px] aspect-[3/4] rounded-[48%/40%] p-[10px] sm:p-[14px] shadow-[0_18px_30px_rgba(0,0,0,0.75)]"
               style={{
-                backgroundImage: `radial-gradient(circle at 50% 50%, #ffffff 1px, transparent 1px)`,
-                backgroundSize: '16px 16px',
+                transform: 'rotateX(10deg)',
+                transformOrigin: '50% 60%',
+                background:
+                  'repeating-linear-gradient(100deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 9px), linear-gradient(160deg, #8a4b1f 0%, #5c2d0e 45%, #3b1b07 100%)',
               }}
-            />
-            {/* Decorative gold stitched border line */}
-            <div className="absolute inset-1.5 rounded-[34px] sm:rounded-[62px] border border-amber-400/25 pointer-events-none" />
-          </div>
-
-          {/* TABLE SURFACE CONTENT: SIDE CHIP TRAYS + CENTER LANCE & DECLARATIONS */}
-          <div className="relative z-10 w-full h-full flex flex-col md:flex-row items-center justify-between gap-1.5 sm:gap-2 my-auto px-1 sm:px-2">
-            {/* LEFT SIDE OF TABLE: Platillo de Piedras de Tu Pareja + Baraja */}
-            <div className="flex items-center gap-1.5 shrink-0 justify-center">
-              {renderPlatillo('Tu Pareja', true, team0Piedras, target)}
-
-              {/* Taco de Baraja Española Fournier 1996 sobre el tapete verde */}
+            >
+              {/* Rail highlight */}
+              <div className="absolute inset-[3px] rounded-[48%/40%] border border-amber-300/30 pointer-events-none" />
+              {/* Felt */}
               <div
-                className="hidden lg:flex flex-col items-center select-none"
-                title="Baraja Española Fournier 1996 (40 naipes) sobre el tapete verde"
+                className="relative w-full h-full rounded-[46%/38%] overflow-hidden shadow-[inset_0_0_28px_rgba(0,0,0,0.75),inset_0_0_4px_rgba(0,0,0,0.9)]"
+                style={{
+                  background:
+                    'radial-gradient(ellipse 70% 55% at 50% 45%, #2f8a52 0%, #1f6a3c 55%, #134a29 100%)',
+                }}
               >
-                <div className="w-9 h-14 rounded-lg border-2 border-stone-950 bg-red-900 shadow-[3px_4px_8px_rgba(0,0,0,0.75)] relative overflow-hidden transform -rotate-6">
-                  <div className="absolute inset-0.5 border border-amber-400/50 bg-gradient-to-br from-red-950 via-red-900 to-red-800 flex items-center justify-center">
-                    <span className="text-[7.5px] font-mono font-black text-amber-300">
-                      40
-                    </span>
-                  </div>
-                </div>
-                <div className="w-8 h-1 bg-stone-900 rounded-b -mt-0.5 transform -rotate-6 shadow" />
-                <span className="text-[7.5px] font-mono font-bold text-amber-200/80 mt-0.5">
-                  Baraja
-                </span>
-              </div>
-            </div>
-
-            {/* CENTER OF TABLE: Lance Placard, Active Bet Pot & Declarations Panel */}
-            <div className="flex-1 flex flex-col items-center max-w-sm sm:max-w-md text-center w-full px-1 z-20">
-              {/* Lance Banner */}
-              <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 border-2 border-yellow-400 px-3 py-1 rounded-xl shadow-xl text-yellow-300 font-mono font-black flex items-center gap-2">
-                <span className="text-[9px] uppercase tracking-widest text-amber-200 leading-none">
-                  LANCE:
-                </span>
-                <span className="text-xs sm:text-base uppercase text-white font-serif font-black">
-                  {currentLanceName}
-                </span>
-              </div>
-
-              {/* Active Bet Pot / Chips in Litigation on the Center of the Table */}
-              {betState.currentBet > 0 && (
-                <div className="mt-1 bg-amber-400 text-stone-950 px-2.5 py-0.5 rounded-full border-2 border-stone-950 font-mono font-black text-xs shadow-lg flex items-center gap-1.5 animate-bounce">
-                  <span>
-                    {betState.isOrdago
-                      ? '🔥 ¡ÓRDAGO EN LITIGIO!'
-                      : `🪙 BOTE EN JUEGO: ${betState.currentBet} PIEDRAS`}
-                  </span>
-                  {betState.accepted && (
-                    <span className="bg-emerald-800 text-white text-[8px] px-1.5 py-0.2 rounded uppercase">
-                      Quiero
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Panel de Declaraciones Oficiales (Pares y Juego) - Visible a todos */}
-              <div className="mt-1 w-full bg-stone-950/95 border border-amber-600/70 rounded-xl p-1.5 shadow-xl backdrop-blur-xs text-[10px] font-mono">
-                <div className="flex items-center justify-between pb-0.5 border-b border-stone-800 text-[8.5px] sm:text-[9px] uppercase tracking-wider text-amber-300 font-bold">
-                  <span className="flex items-center gap-1">
-                    <span>📋</span>
-                    <span>Declaraciones Oficiales</span>
-                  </span>
-                  <span className="text-[7.5px] sm:text-[8px] text-stone-400 font-normal">
-                    {phase === 'pares_precheck' || phase === 'pares_bet'
-                      ? '• en lance de pares'
-                      : phase === 'juego_precheck' || phase === 'juego_bet'
-                      ? '• en lance de juego'
-                      : '• mesa completa'}
-                  </span>
-                </div>
-
-                {/* PARES ROW */}
+                {/* Baize fibre texture */}
                 <div
-                  className={`mt-1 p-0.5 rounded transition-colors ${
-                    phase === 'pares_precheck' || phase === 'pares_bet'
-                      ? 'bg-amber-950/80 border border-amber-500/80 shadow-xs'
-                      : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[8px] font-bold text-stone-300 mb-0.5 px-0.5">
-                    <span className="flex items-center gap-1">
-                      <span className="text-amber-400">🃏</span>
-                      <span>PARES:</span>
-                    </span>
-                    <span className="text-[7.5px] text-stone-400 font-mono">
-                      {pSouth?.declaredPares === null && pNorth?.declaredPares === null
-                        ? 'Esperando consulta'
-                        : 'Certificado oficial'}
-                    </span>
+                  className="absolute inset-0 opacity-25 mix-blend-overlay pointer-events-none"
+                  style={{
+                    backgroundImage:
+                      'repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 3px), repeating-linear-gradient(-45deg, rgba(0,0,0,0.12) 0 1px, transparent 1px 3px)',
+                  }}
+                />
+                {/* Lamp reflection */}
+                <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_40%_30%_at_50%_42%,rgba(255,230,170,0.22),transparent_70%)]" />
+                {/* Stitched inner line */}
+                <div className="absolute inset-[7%] rounded-[46%/38%] border border-dashed border-emerald-200/15 pointer-events-none" />
+
+                {/* North's cards */}
+                {pNorth && (
+                  <div className="absolute left-1/2 top-[3%] -translate-x-1/2 scale-[0.8] sm:scale-100 origin-top">
+                    <CardFan cards={pNorth.cards} rotation={180} showAllCards={showAllCards} />
                   </div>
-                  <div className="grid grid-cols-2 gap-1 text-[8.5px]">
-                    {/* Tu Pareja */}
-                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
-                      <span className="text-emerald-400 font-bold truncate max-w-[55px]">
-                        Pareja
-                      </span>
-                      <span className="flex items-center gap-1 font-black">
-                        <span
-                          className={
-                            pSouth?.declaredPares
-                              ? 'text-emerald-300'
-                              : pSouth?.declaredPares === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Tú:{pSouth?.declaredPares ? 'SÍ' : pSouth?.declaredPares === false ? 'NO' : '?'}
-                        </span>
-                        <span className="text-stone-600">|</span>
-                        <span
-                          className={
-                            pNorth?.declaredPares
-                              ? 'text-emerald-300'
-                              : pNorth?.declaredPares === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Par:{pNorth?.declaredPares ? 'SÍ' : pNorth?.declaredPares === false ? 'NO' : '?'}
-                        </span>
-                      </span>
-                    </div>
-                    {/* Rivales */}
-                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
-                      <span className="text-rose-400 font-bold truncate max-w-[50px]">
-                        Rivales
-                      </span>
-                      <span className="flex items-center gap-1 font-black">
-                        <span
-                          className={
-                            pEast?.declaredPares
-                              ? 'text-rose-300'
-                              : pEast?.declaredPares === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Est:{pEast?.declaredPares ? 'SÍ' : pEast?.declaredPares === false ? 'NO' : '?'}
-                        </span>
-                        <span className="text-stone-600">|</span>
-                        <span
-                          className={
-                            pWest?.declaredPares
-                              ? 'text-rose-300'
-                              : pWest?.declaredPares === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Oes:{pWest?.declaredPares ? 'SÍ' : pWest?.declaredPares === false ? 'NO' : '?'}
-                        </span>
-                      </span>
-                    </div>
+                )}
+                {/* West's cards */}
+                {pWest && (
+                  <div className="absolute left-[-6%] sm:left-[-2%] top-1/2 -translate-y-1/2 scale-[0.75] sm:scale-100">
+                    <CardFan cards={pWest.cards} rotation={90} showAllCards={showAllCards} />
+                  </div>
+                )}
+                {/* East's cards */}
+                {pEast && (
+                  <div className="absolute right-[-6%] sm:right-[-2%] top-1/2 -translate-y-1/2 scale-[0.75] sm:scale-100">
+                    <CardFan cards={pEast.cards} rotation={-90} showAllCards={showAllCards} />
+                  </div>
+                )}
+
+                {/* Deck resting in front of the mano */}
+                <div className={`absolute ${deckPosition} transition-all duration-700`} title="Baraja Española de 40 naipes">
+                  <div className="relative w-7 h-10 sm:w-8 sm:h-12 rotate-[-14deg]">
+                    {[3, 2, 1, 0].map((o) => (
+                      <div
+                        key={o}
+                        className="absolute inset-0 rounded-md border border-stone-950 bg-gradient-to-br from-red-800 to-red-950 shadow-[1px_2px_3px_rgba(0,0,0,0.6)]"
+                        style={{ transform: `translate(${o * 1}px, ${-o * 1.2}px)` }}
+                      >
+                        <div className="absolute inset-0.5 rounded border border-amber-400/40" />
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* JUEGO ROW */}
-                <div
-                  className={`mt-0.5 p-0.5 rounded transition-colors ${
-                    phase === 'juego_precheck' || phase === 'juego_bet'
-                      ? 'bg-amber-950/80 border border-amber-500/80 shadow-xs'
-                      : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[8px] font-bold text-stone-300 mb-0.5 px-0.5">
-                    <span className="flex items-center gap-1">
-                      <span className="text-amber-400">🔥</span>
-                      <span>JUEGO (&ge;31):</span>
-                    </span>
-                    <span className="text-[7.5px] text-stone-400 font-mono">
-                      {pSouth?.declaredJuego === null && pNorth?.declaredJuego === null
-                        ? 'Esperando consulta'
-                        : 'Certificado oficial'}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 text-[8.5px]">
-                    {/* Tu Pareja */}
-                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
-                      <span className="text-emerald-400 font-bold truncate max-w-[55px]">
-                        Pareja
-                      </span>
-                      <span className="flex items-center gap-1 font-black">
-                        <span
-                          className={
-                            pSouth?.declaredJuego
-                              ? 'text-amber-300'
-                              : pSouth?.declaredJuego === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Tú:{pSouth?.declaredJuego ? 'SÍ' : pSouth?.declaredJuego === false ? 'NO' : '?'}
-                        </span>
-                        <span className="text-stone-600">|</span>
-                        <span
-                          className={
-                            pNorth?.declaredJuego
-                              ? 'text-amber-300'
-                              : pNorth?.declaredJuego === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Par:{pNorth?.declaredJuego ? 'SÍ' : pNorth?.declaredJuego === false ? 'NO' : '?'}
-                        </span>
-                      </span>
-                    </div>
-                    {/* Rivales */}
-                    <div className="bg-stone-900/90 rounded px-1.5 py-0.5 border border-stone-800 flex items-center justify-between">
-                      <span className="text-rose-400 font-bold truncate max-w-[50px]">
-                        Rivales
-                      </span>
-                      <span className="flex items-center gap-1 font-black">
-                        <span
-                          className={
-                            pEast?.declaredJuego
-                              ? 'text-rose-300'
-                              : pEast?.declaredJuego === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Est:{pEast?.declaredJuego ? 'SÍ' : pEast?.declaredJuego === false ? 'NO' : '?'}
-                        </span>
-                        <span className="text-stone-600">|</span>
-                        <span
-                          className={
-                            pWest?.declaredJuego
-                              ? 'text-rose-300'
-                              : pWest?.declaredJuego === false
-                              ? 'text-stone-500'
-                              : 'text-stone-600'
-                          }
-                        >
-                          Oes:{pWest?.declaredJuego ? 'SÍ' : pWest?.declaredJuego === false ? 'NO' : '?'}
-                        </span>
-                      </span>
-                    </div>
+                {/* Pot: the stones at stake in the current lance */}
+                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" title={betState.currentBet > 0 ? `En juego: ${betState.isOrdago ? 'Órdago' : betState.currentBet + ' piedras'}` : 'Bote vacío'}>
+                  <div className="relative w-11 h-11 sm:w-20 sm:h-20 rounded-full bg-[radial-gradient(circle_at_40%_35%,#7a4a22,#4a2a10_70%)] border-2 border-[#2b1606] shadow-[inset_0_3px_8px_rgba(0,0,0,0.7),0_3px_6px_rgba(0,0,0,0.5)]">
+                    <StonePile count={potStones} radius={14} className="left-1/2 top-1/2" />
+                    {betState.isOrdago && (
+                      <span className="absolute inset-0 flex items-center justify-center text-2xl animate-pulse">🔥</span>
+                    )}
                   </div>
                 </div>
+
+                {/* Each team's stones, next to its players */}
+                <StonePile
+                  count={scoreTeam0?.piedras || 0}
+                  className="left-[70%] top-[80%]"
+                  title={`Piedras de tu pareja: ${scoreTeam0?.piedras || 0}`}
+                />
+                <StonePile
+                  count={scoreTeam1?.piedras || 0}
+                  className="left-[30%] top-[22%]"
+                  title={`Piedras rivales: ${scoreTeam1?.piedras || 0}`}
+                />
               </div>
-            </div>
-
-            {/* RIGHT SIDE OF TABLE: Platillo de Piedras de los Rivales */}
-            <div className="flex items-center gap-1.5 shrink-0 justify-center">
-              {renderPlatillo('Rivales', false, team1Piedras, target)}
             </div>
           </div>
         </div>
 
-        {/* EAST SEATED PLAYER (Right - Fully Visible) */}
-        <div className="relative z-30 flex-shrink-0">
-          {pEast && (
-            <SeatedPlayer
-              player={pEast}
-              seatPosition="east"
-              seatIndex={1}
-              isMano={manoIndex === 1}
-              showAllCards={showAllCards}
-            />
-          )}
+        {/* EAST */}
+        <div className="flex justify-start">
+          {pEast && <SeatedPlayer player={pEast} seatPosition="east" {...seatProps(1)} />}
         </div>
       </div>
 
-      {/* 4. SOUTH: HUMAN PLAYER ROW (Left: Controls module, Center: 4 Cards, Right: Player Badge) */}
-      <div className="relative z-30 w-full px-2 sm:px-4 pb-2 pt-1 flex flex-col lg:flex-row items-center justify-between gap-2.5">
-        {/* LEFT OF CARDS: Controls module (Selector 1: «ese módulo a la izq. de las cartas») */}
-        <div className="w-full lg:w-[320px] xl:w-[350px] shrink-0 flex justify-center lg:justify-start order-2 lg:order-1">
-          {controlsNode}
+      {/* 5. SOUTH: your hand rests over the near edge of the table */}
+      {pSouth && (
+        <div className="relative z-30 -mt-3 sm:-mt-5 flex flex-col items-center">
+          <CartoonPlayerHands
+            cards={pSouth.cards}
+            selectedIndices={pSouth.selectedToDiscard}
+            isDiscardPhase={isDiscardPhase}
+            onCardClick={onCardClick}
+          />
         </div>
+      )}
 
-        {/* CENTER: 4 Player Cards with authentic Spanish Figures (Selector 2: «las cartas») */}
-        <div className="shrink-0 flex justify-center order-1 lg:order-2">
-          {pSouth && (
-            <CartoonPlayerHands
-              cards={pSouth.cards}
-              selectedIndices={pSouth.selectedToDiscard}
-              isDiscardPhase={isDiscardPhase}
-              onCardClick={onCardClick}
-            />
-          )}
-        </div>
-
-        {/* RIGHT OF CARDS: South Player Badge & Status (Selector 2's sibling: «el otro a la derecha») */}
-        <div className="w-full lg:w-[320px] xl:w-[350px] shrink-0 flex justify-center lg:justify-end order-3">
-          {pSouth && (
-            <div className="relative flex items-center gap-2.5 px-3.5 py-1.5 rounded-2xl bg-stone-950/95 border-2 border-stone-800 hover:border-amber-500/70 shadow-xl backdrop-blur-xs">
-              <div className="relative shrink-0">
-                <CharacterAvatar
-                  characterId={activeUser?.avatarId || pSouth.id}
-                  characterName={activeUser?.name || pSouth.name}
-                  size="md"
-                  isSpeaking={!!pSouth.currentSpeech}
-                  className="ring-2 ring-stone-900 shadow-md"
-                />
-                {manoIndex === 0 && (
-                  <span
-                    className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-xs flex items-center justify-center shadow-lg border-2 border-stone-950 z-30 animate-bounce"
-                    title="Mano de la ronda de Mus"
-                  >
-                    M
-                  </span>
-                )}
+      {/* 6. YOUR SEAT PANEL (below the table): you, your eyes and your señas */}
+      {pSouth && (
+        <div className="relative z-40 flex flex-col items-center gap-1 px-2 pb-2">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 bg-stone-950/90 border border-sky-600/60 rounded-2xl px-2 py-1 shadow-lg max-w-full">
+            <div className="relative shrink-0" ref={setHeadRef(0)}>
+              <CharacterAvatar
+                characterId={activeUser?.avatarId || pSouth.id}
+                characterName={activeUser?.name || pSouth.name}
+                size="sm"
+                isSpeaking={!!pSouth.currentSpeech}
+                className="ring-2 ring-stone-900"
+              />
+              {manoIndex === 0 && (
+                <span
+                  className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-amber-400 text-stone-950 font-mono font-black text-[10px] flex items-center justify-center shadow-lg border-2 border-stone-950"
+                  title="Mano de la ronda de Mus"
+                >
+                  M
+                </span>
+              )}
+            </div>
+            {(pSouth.declaredPares != null || pSouth.declaredJuego != null) && (
+              <div className="flex items-center gap-0.5 text-[9px] font-mono font-black">
+                {pSouth.declaredPares != null && <DeclarationChip label="Pares" value={pSouth.declaredPares} />}
+                {pSouth.declaredJuego != null && <DeclarationChip label="Juego" value={pSouth.declaredJuego} />}
               </div>
-
-              <div className="flex flex-col min-w-0 pr-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-serif font-black text-sm sm:text-base text-amber-200 truncate max-w-[120px] sm:max-w-[150px]">
-                    {activeUser?.name || pSouth.name}
-                  </span>
-                  <span className="text-[8px] sm:text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-emerald-700 text-emerald-100 uppercase tracking-wider border border-emerald-500/50">
-                    Tú (Sur)
-                  </span>
-                </div>
-                <div className="text-[10px] text-stone-400 font-mono">
-                  Pareja de {pNorth?.name || 'Norte'}
-                </div>
-
-                {/* Indicador de Pares y Juego de Tú (Sur) */}
-                <div className="flex items-center gap-1 mt-1 font-mono text-[9px] font-black">
-                  <span
-                    className={`px-1.5 py-0.5 rounded border transition-colors ${
-                      pSouth.hasPares
-                        ? 'bg-emerald-950 text-emerald-300 border-emerald-500 shadow-xs'
-                        : 'bg-stone-900 text-stone-400 border-stone-800'
+            )}
+            {onSetHumanGaze && (
+              <>
+                <span className="text-[10px] font-mono font-black text-sky-300">👀 Mirar a:</span>
+                {([3, 2, 1, -1] as GazeTarget[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => onSetHumanGaze(t)}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition cursor-pointer ${
+                      humanGaze === t
+                        ? 'bg-sky-500 text-stone-950 border-sky-300'
+                        : 'bg-stone-900 text-stone-300 border-stone-700 hover:border-sky-400'
                     }`}
-                    title={
-                      pSouth.hasPares
-                        ? 'Tu mano TIENE Pares (participas en el lance)'
-                        : 'Tu mano NO tiene pares'
-                    }
                   >
-                    {pSouth.declaredPares !== null
-                      ? `Pares: ${pSouth.declaredPares ? 'SÍ' : 'NO'}`
-                      : `Pares: ${pSouth.hasPares ? 'SÍ' : 'NO'}`}
-                  </span>
+                    {t === -1
+                      ? '🃏 Mis cartas'
+                      : t === 2
+                      ? `🤝 ${players[2]?.name || 'Norte'}`
+                      : `${t === 3 ? '⬅️' : '➡️'} ${players[t]?.name || SEAT_NAMES[t]}`}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
 
+          {onSetHumanGaze &&
+            (() => {
+              const watchers = [1, 3].filter((s) => gazes[s] === 0);
+              const partnerLooking = gazes[2] === 0;
+              return (
+                <div className="flex flex-wrap items-center justify-center gap-1 bg-stone-950/90 border border-amber-600/60 rounded-2xl px-2 py-1 shadow-lg max-w-full">
                   <span
-                    className={`px-1.5 py-0.5 rounded border transition-colors ${
-                      pSouth.hasJuego
-                        ? 'bg-amber-950 text-amber-300 border-amber-500 shadow-xs'
-                        : 'bg-stone-900 text-stone-400 border-stone-800'
+                    className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                      partnerLooking ? 'bg-emerald-600 text-white' : 'bg-stone-800 text-stone-400'
                     }`}
-                    title={
-                      pSouth.hasJuego
-                        ? `Tu mano TIENE Juego (suma ${pSouth.juegoValue})`
-                        : `Tu mano NO tiene juego (Punto: ${pSouth.juegoValue})`
-                    }
                   >
-                    {pSouth.declaredJuego !== null
-                      ? `Juego: ${pSouth.declaredJuego ? `SÍ (${pSouth.juegoValue})` : 'NO'}`
-                      : `Juego: ${pSouth.hasJuego ? `SÍ (${pSouth.juegoValue})` : `NO (${pSouth.juegoValue})`}`}
+                    {partnerLooking ? '🤝 Tu compañero te mira' : '🤝 Tu compañero no te mira'}
                   </span>
+                  <span
+                    className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                      watchers.length ? 'bg-rose-600 text-white animate-pulse' : 'bg-stone-800 text-stone-400'
+                    }`}
+                  >
+                    {watchers.length
+                      ? `👁️ Te vigila: ${watchers.map((s) => players[s]?.name).join(' y ')}`
+                      : '😎 Ningún rival te mira'}
+                  </span>
+                  {onQuickSeña &&
+                    (señasEnabled && validSeñas.length > 0 ? (
+                      validSeñas.map((seña) => (
+                        <button
+                          key={seña.id}
+                          type="button"
+                          onClick={() => onQuickSeña(seña)}
+                          className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-black bg-amber-500 hover:bg-amber-400 text-stone-950 border border-stone-950 shadow cursor-pointer active:scale-95"
+                          title={`${seña.gesture} — ${seña.meaning}`}
+                        >
+                          🤫 {señaShortLabel(seña.id)}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-[10px] font-mono text-stone-500 italic">
+                        {señasEnabled ? 'Sin jugada para señas' : 'Señas no disponibles ahora'}
+                      </span>
+                    ))}
                 </div>
-              </div>
+              );
+            })()}
 
-              {/* Speech bubble for South if speaking */}
-              {pSouth.currentSpeech && (
-                <div className="absolute bottom-full mb-2 right-0 z-40 bg-amber-100 text-stone-950 border-2 border-stone-950 px-3 py-1 rounded-xl shadow-xl font-sans text-xs font-bold whitespace-nowrap animate-bounce">
-                  <span className="text-[10px] text-amber-800 font-mono block -mb-0.5 font-bold uppercase">
-                    {activeUser?.name || pSouth.name}:
-                  </span>
-                  <span>«{pSouth.currentSpeech}»</span>
-                </div>
+          {((intelYourTeam[0] || []).length > 0 || (intelRivals[0] || []).length > 0) && (
+            <div className="flex flex-wrap justify-center gap-1">
+              {(intelYourTeam[0] || []).length > 0 && (
+                <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-900/90 text-emerald-200 border border-emerald-500/60">
+                  🤝 Tu compañero sabe: {(intelYourTeam[0] || []).map(señaShortLabel).join(' · ')}
+                </span>
+              )}
+              {(intelRivals[0] || []).length > 0 && (
+                <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-rose-950/90 text-rose-200 border border-rose-500/60">
+                  ⚠️ Los rivales saben: {(intelRivals[0] || []).map(señaShortLabel).join(' · ')}
+                </span>
               )}
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 };
