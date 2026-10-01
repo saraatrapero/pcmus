@@ -43,9 +43,9 @@ export const RecuentoOverlay: React.FC<RecuentoOverlayProps> = ({
     if (activeStep < totalLances) {
       const lance = recountPlan.steps[activeStep];
       if (lance.pointsAwarded > 0 && lance.winningTeam !== null) {
-        sound.playChip();
         if (!awardedStepsRef.current.has(activeStep)) {
           awardedStepsRef.current.add(activeStep);
+          sound.playChip();
           onLancePointsAwarded?.(
             lance.winningTeam,
             lance.pointsAwarded,
@@ -53,8 +53,9 @@ export const RecuentoOverlay: React.FC<RecuentoOverlayProps> = ({
           );
         }
       }
-    } else {
+    } else if (!awardedStepsRef.current.has(-1)) {
       // Reached summary
+      awardedStepsRef.current.add(-1);
       sound.playCard();
     }
   }, [activeStep, totalLances, recountPlan.steps, onLancePointsAwarded]);

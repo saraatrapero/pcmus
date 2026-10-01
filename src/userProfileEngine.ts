@@ -115,7 +115,11 @@ class UserProfileEngine {
     try {
       const storedProfiles = localStorage.getItem(STORAGE_PROFILES_KEY);
       if (storedProfiles) {
-        this.profiles = JSON.parse(storedProfiles);
+        const parsed = JSON.parse(storedProfiles);
+        this.profiles = (Array.isArray(parsed) ? parsed : [])
+          .filter((p: Partial<UserProfile>) => p && typeof p.id === 'string')
+          .map((p: UserProfile) => ({ ...p, playstyle: { ...defaultPlaystyle(), ...(p.playstyle || {}) } }));
+        if (this.profiles.length === 0) this.profiles = [...DEFAULT_PROFILES];
       } else {
         this.profiles = [...DEFAULT_PROFILES];
         this.save();

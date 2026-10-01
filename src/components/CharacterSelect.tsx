@@ -57,10 +57,10 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
         <div className="inline-block px-3 py-1 bg-amber-950 border border-amber-600 text-amber-300 font-mono text-xs font-bold rounded mb-2 tracking-widest">
           CÍRCULO ASM & LIT • MS-DOS 1996
         </div>
-        <h1 className="text-3xl sm:text-5xl font-black font-serif text-amber-300 tracking-wider">
+        <h1 className="text-4xl sm:text-6xl font-black font-display tracking-[0.12em] bg-gradient-to-b from-brass-300 via-brass-400 to-brass-600 bg-clip-text text-transparent drop-shadow-[0_3px_0_rgba(0,0,0,0.55)]">
           PC MUS
         </h1>
-        <p className="text-sm text-stone-400 mt-1 max-w-xl mx-auto">
+        <p className="text-sm sm:text-base text-stone-300/90 mt-1 max-w-xl mx-auto font-serif italic">
           El legendario simulador de mus español con los personajes de la farándula de los 90.
         </p>
 

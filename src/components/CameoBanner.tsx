@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Cameo } from '../characters';
 import { sound } from '../sound';
 import { voiceEngine } from '../voiceEngine';
@@ -14,16 +14,21 @@ export const CameoBanner: React.FC<CameoBannerProps> = ({ cameo, onDismiss }) =>
     ? 'chiquito'
     : 'karlos';
 
+  // Keep the latest callback without restarting the timer (the parent re-renders often)
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
   useEffect(() => {
     if (cameo) {
       sound.playCameo();
       voiceEngine.speakCharacter(cameoCharId, cameo.quote);
       const timer = setTimeout(() => {
-        onDismiss();
+        onDismissRef.current();
       }, 5500);
       return () => clearTimeout(timer);
     }
-  }, [cameo, onDismiss, cameoCharId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameo]);
 
   if (!cameo) return null;
 

@@ -58,9 +58,9 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
       )}
 
       {/* Top Bar Navigation & Utility Controls */}
-      <header className="w-full max-w-5xl mx-auto px-4 py-2 flex items-center justify-between border-b border-stone-800 bg-stone-950 rounded-b-2xl mb-2 select-none shadow-md">
-        <div className="flex items-center gap-2">
-          <span className="font-serif font-black text-amber-400 text-lg tracking-wider">
+      <header className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-brass-500/30 bg-gradient-to-b from-[#1f1108] to-[#130a04] rounded-b-2xl mb-2 select-none shadow-[0_8px_20px_rgba(0,0,0,0.5)]">
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-display whitespace-nowrap font-black text-brass-400 text-lg tracking-wider drop-shadow-[0_2px_0_rgba(0,0,0,0.6)]">
             PC MUS <span className="text-xs text-stone-400 font-mono">1996</span>
           </span>
           <span className="bg-amber-950 text-amber-300 text-[10px] px-2 py-0.5 rounded border border-amber-600/40 uppercase font-mono hidden sm:inline">
@@ -72,7 +72,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2 min-w-0">
           {/* User Control & AI Learning shortcut button */}
           {onOpenUserControl && (
             <button
