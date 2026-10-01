@@ -228,7 +228,7 @@ class UserProfileEngine {
    * Registra una acción del usuario para que el motor de IA aprenda de su patrón
    */
   public recordAction(
-    action: 'mus' | 'no_mus' | 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero',
+    action: 'mus' | 'no_mus' | 'paso' | 'envido' | 'mas' | 'ordago' | 'quiero' | 'no_quiero' | string,
     lance?: 'grande' | 'chica' | 'pares' | 'juego' | 'punto',
     handStrength: number = 5.0, // 0..10
     isRivalOrdago: boolean = false
@@ -237,21 +237,27 @@ class UserProfileEngine {
     const ps = user.playstyle;
     ps.totalActions++;
 
-    if (action === 'mus') ps.musCount++;
-    if (action === 'no_mus') ps.noMusCount++;
-    if (action === 'paso') ps.pasoCount++;
-    if (action === 'envido') ps.envidoCount++;
-    if (action === 'mas') ps.masCount++;
-    if (action === 'ordago') ps.ordagoCount++;
+    const baseAction = typeof action === 'string' && action.startsWith('envido')
+      ? 'envido'
+      : typeof action === 'string' && action.startsWith('mas')
+      ? 'mas'
+      : action;
+
+    if (baseAction === 'mus') ps.musCount++;
+    if (baseAction === 'no_mus') ps.noMusCount++;
+    if (baseAction === 'paso') ps.pasoCount++;
+    if (baseAction === 'envido') ps.envidoCount++;
+    if (baseAction === 'mas') ps.masCount++;
+    if (baseAction === 'ordago') ps.ordagoCount++;
 
     if (isRivalOrdago) {
       ps.ordagoFaced++;
-      if (action === 'quiero') ps.ordagoAccepted++;
-      if (action === 'no_quiero') ps.ordagoRefused++;
+      if (baseAction === 'quiero') ps.ordagoAccepted++;
+      if (baseAction === 'no_quiero') ps.ordagoRefused++;
     }
 
     // Análisis de Farol vs Valor
-    const isAggressiveBet = action === 'envido' || action === 'mas' || action === 'ordago';
+    const isAggressiveBet = baseAction === 'envido' || baseAction === 'mas' || baseAction === 'ordago';
     if (isAggressiveBet) {
       if (handStrength < 5.0) {
         ps.bluffBets++;

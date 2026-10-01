@@ -298,3 +298,75 @@ export function getWinningTeamForLance(
     description: `${bestPlayer.name} gana el lance de ${lance.toUpperCase()} (Mano o mejor valor).`,
   };
 }
+
+export function getRankName(rank: number): string {
+  if (rank === 12) return 'Rey';
+  if (rank === 11) return 'Caballo';
+  if (rank === 10) return 'Sota';
+  if (rank === 1) return 'As';
+  return `${rank}`;
+}
+
+export function describeParesHand(cards: Card[]): {
+  hasPares: boolean;
+  type: 'none' | 'par' | 'medias' | 'duples';
+  title: string;
+  detail: string;
+} {
+  const p = evaluatePares(cards);
+  if (p.type === 'none') {
+    return {
+      hasPares: false,
+      type: 'none',
+      title: 'Sin Pares',
+      detail: 'Tus 4 cartas son de diferente valor.',
+    };
+  }
+  if (p.type === 'duples') {
+    return {
+      hasPares: true,
+      type: 'duples',
+      title: '¡Tienes DUPLES!',
+      detail: `Duples de ${getRankName(p.primaryRank)}es y ${getRankName(p.secondaryRank)}es`,
+    };
+  }
+  if (p.type === 'medias') {
+    return {
+      hasPares: true,
+      type: 'medias',
+      title: '¡Tienes MEDIAS!',
+      detail: `Trío / Medias de ${getRankName(p.primaryRank)}es`,
+    };
+  }
+  return {
+    hasPares: true,
+    type: 'par',
+    title: '¡Tienes PAR!',
+    detail: `Pareja de ${getRankName(p.primaryRank)}es`,
+  };
+}
+
+export function describeJuegoHand(cards: Card[]): {
+  hasJuego: boolean;
+  sum: number;
+  title: string;
+  detail: string;
+} {
+  const sum = getHandSum(cards);
+  if (sum >= 31) {
+    const special =
+      sum === 31 ? '31 (Treinta y una - La mejor)' : sum === 32 ? '32 de Juego' : `${sum} de Juego`;
+    return {
+      hasJuego: true,
+      sum,
+      title: '¡Tienes JUEGO!',
+      detail: `Tus cartas suman ${sum} (${special})`,
+    };
+  }
+  return {
+    hasJuego: false,
+    sum,
+    title: 'Sin Juego (Punto)',
+    detail: `Tus cartas suman ${sum} (no llegas a 31; juegas al Punto)`,
+  };
+}
