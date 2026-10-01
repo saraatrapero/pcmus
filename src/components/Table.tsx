@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Player, LancePhase, LanceBetState, TeamScore } from '../types';
+import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
+import { Player, LancePhase, LanceBetState, TeamScore, Seña } from '../types';
+import { GazeTarget, IntelState, SEAT_NAMES, señaShortLabel } from '../gazeSystem';
 import { SeatedPlayer } from './SeatedPlayer';
 import { CartoonPlayerHands } from './CartoonPlayerHands';
 import { CharacterAvatar } from './CharacterAvatar';
@@ -22,7 +23,15 @@ interface TableProps {
   activeUser?: UserProfile;
   gameSpeed?: 'tranquilo' | 'normal' | 'rapido';
   onChangeGameSpeed?: () => void;
+  gazes?: GazeTarget[]; // gaze target per seat
+  intel?: IntelState;
+  onSetHumanGaze?: (target: GazeTarget) => void;
+  validSeñas?: Seña[];
+  señasEnabled?: boolean;
+  onQuickSeña?: (seña: Seña) => void;
 }
+
+type Point = { x: number; y: number };
 
 export const Table: React.FC<TableProps> = ({
   players,
@@ -40,7 +49,63 @@ export const Table: React.FC<TableProps> = ({
   activeUser,
   gameSpeed = 'tranquilo',
   onChangeGameSpeed,
+  gazes = [-1, -1, -1, -1],
+  intel = [{}, {}],
+  onSetHumanGaze,
+  validSeñas = [],
+  señasEnabled = false,
+  onQuickSeña,
 }) => {
+  // Head positions (relative to the table container) to draw the lines of sight
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const headEls = useRef<(HTMLDivElement | null)[]>([null, null, null, null]);
+  const tableSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [headPoints, setHeadPoints] = useState<(Point | null)[]>([null, null, null, null]);
+  const [tableCenter, setTableCenter] = useState<Point | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
+  const [resizeTick, setResizeTick] = useState(0);
+
+  useEffect(() => {
+    const onResize = () => setResizeTick((t) => t + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const base = container.getBoundingClientRect();
+    const center = (el: Element | null): Point | null => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left - base.left + r.width / 2, y: r.top - base.top + r.height / 2 };
+    };
+    const pts = headEls.current.map((el) => center(el));
+    const tc = center(tableSurfaceRef.current);
+    const same =
+      pts.every((p, i) => {
+        const q = headPoints[i];
+        if (!p || !q) return p === q;
+        return Math.abs(p.x - q.x) < 2 && Math.abs(p.y - q.y) < 2;
+      }) &&
+      Math.abs(base.width - size.w) < 2 &&
+      Math.abs(base.height - size.h) < 2 &&
+      !!tc === !!tableCenter;
+    if (!same) {
+      setHeadPoints(pts);
+      setTableCenter(tc);
+      setSize({ w: base.width, h: base.height });
+    }
+  });
+
+  const setHeadRef = (seat: number) => (el: HTMLDivElement | null) => {
+    headEls.current[seat] = el;
+  };
+
+  const intelYourTeam = intel[0] || {};
+  const intelRivals = intel[1] || {};
+  const humanGaze = gazes[0] ?? -1;
+
   const isDiscardPhase = phase === 'discarding';
   const pSouth = players[0];
   const pEast = players[1];
@@ -70,7 +135,7 @@ export const Table: React.FC<TableProps> = ({
   );
 
   return (
-    <div className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col justify-between min-h-[500px] sm:min-h-[540px]">
+    <div ref={containerRef} className="relative w-full max-w-5xl mx-auto my-1 rounded-3xl border-4 border-stone-900 shadow-2xl overflow-hidden select-none flex flex-col justify-between min-h-[500px] sm:min-h-[540px]">
       {/* 1. TAVERN BAR BACKGROUND (Clean wallpaper, no UI, no bottom settings/icons) */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <img
@@ -88,6 +153,53 @@ export const Table: React.FC<TableProps> = ({
           }`}
         />
       </div>
+
+      {/* LINES OF SIGHT: who is looking at whom (red when someone is watching you) */}
+      <svg
+        className="absolute inset-0 z-[25] pointer-events-none"
+        width={size.w}
+        height={size.h}
+        viewBox={`0 0 ${size.w} ${size.h}`}
+      >
+        {gazes.map((target, seat) => {
+          const from = headPoints[seat];
+          if (!from || target === -1) return null;
+          const to = headPoints[target];
+          if (!to) return null;
+          const watchingYou = target === 0;
+          const isHuman = seat === 0;
+          const color = isHuman
+            ? '#38bdf8'
+            : watchingYou
+            ? '#f43f5e'
+            : seat % 2 === 0
+            ? '#34d399'
+            : '#fb7185';
+          // Stop the line slightly before the target head
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const end = { x: to.x - (dx / len) * 34, y: to.y - (dy / len) * 34 };
+          const start = { x: from.x + (dx / len) * 30, y: from.y + (dy / len) * 30 };
+          return (
+            <g key={seat}>
+              <line
+                x1={start.x}
+                y1={start.y}
+                x2={end.x}
+                y2={end.y}
+                stroke={color}
+                strokeWidth={watchingYou || isHuman ? 2.5 : 1.5}
+                strokeDasharray="6 5"
+                strokeOpacity={watchingYou || isHuman ? 0.9 : 0.55}
+              >
+                <animate attributeName="stroke-dashoffset" from="22" to="0" dur="0.9s" repeatCount="indefinite" />
+              </line>
+              <circle cx={end.x} cy={end.y} r={3.5} fill={color} fillOpacity={0.9} />
+            </g>
+          );
+        })}
+      </svg>
 
       {/* TOP UTILITY BAR (Controls on sides, clean space in center) */}
       <div className="relative z-30 flex items-center justify-between px-3 pt-2">
@@ -156,9 +268,14 @@ export const Table: React.FC<TableProps> = ({
           <SeatedPlayer
             player={pNorth}
             seatPosition="north"
-            seatIndex={2}
+              seatIndex={2}
             isMano={manoIndex === 2}
             showAllCards={showAllCards}
+            gaze={gazes[2] ?? -1}
+            isWatchedByYou={humanGaze === 2}
+            knownByYourTeam={intelYourTeam[2] || []}
+            onWatch={onSetHumanGaze ? () => onSetHumanGaze(humanGaze === 2 ? -1 : 2) : undefined}
+            headRef={setHeadRef(2)}
           />
         )}
       </div>
@@ -174,12 +291,18 @@ export const Table: React.FC<TableProps> = ({
               seatIndex={3}
               isMano={manoIndex === 3}
               showAllCards={showAllCards}
+              gaze={gazes[3] ?? -1}
+              isWatchedByYou={humanGaze === 3}
+              knownByYourTeam={intelYourTeam[3] || []}
+              knowsYourSeñas={intelRivals[0] || []}
+              onWatch={onSetHumanGaze ? () => onSetHumanGaze(humanGaze === 3 ? -1 : 3) : undefined}
+              headRef={setHeadRef(3)}
             />
           )}
         </div>
 
         {/* OVAL WOODEN TABLE SURFACE */}
-        <div className="flex-1 mx-2 sm:mx-4 h-full min-h-[160px] sm:min-h-[180px] rounded-[100px] border-[5px] sm:border-[7px] border-[#381a06] bg-gradient-to-b from-[#d99f60] via-[#c68945] to-[#b06f2d] shadow-[inset_0_4px_25px_rgba(0,0,0,0.6),0_12px_24px_rgba(0,0,0,0.8)] relative p-3 flex flex-col items-center justify-between overflow-hidden">
+        <div ref={tableSurfaceRef} className="flex-1 mx-2 sm:mx-4 h-full min-h-[160px] sm:min-h-[180px] rounded-[100px] border-[5px] sm:border-[7px] border-[#381a06] bg-gradient-to-b from-[#d99f60] via-[#c68945] to-[#b06f2d] shadow-[inset_0_4px_25px_rgba(0,0,0,0.6),0_12px_24px_rgba(0,0,0,0.8)] relative p-3 flex flex-col items-center justify-between overflow-hidden">
           {/* Wooden planks horizontal texture lines */}
           <div
             className="absolute inset-0 opacity-15 pointer-events-none"
@@ -242,6 +365,12 @@ export const Table: React.FC<TableProps> = ({
               seatIndex={1}
               isMano={manoIndex === 1}
               showAllCards={showAllCards}
+              gaze={gazes[1] ?? -1}
+              isWatchedByYou={humanGaze === 1}
+              knownByYourTeam={intelYourTeam[1] || []}
+              knowsYourSeñas={intelRivals[0] || []}
+              onWatch={onSetHumanGaze ? () => onSetHumanGaze(humanGaze === 1 ? -1 : 1) : undefined}
+              headRef={setHeadRef(1)}
             />
           )}
         </div>
@@ -252,7 +381,7 @@ export const Table: React.FC<TableProps> = ({
         {/* South Player Badge with prominent Avatar (Crisp, sharp, non-blurry, never covering cards) */}
         {pSouth && (
           <div className="flex items-center gap-2.5 mb-1 px-3.5 py-1.5 rounded-2xl bg-stone-950 border-2 border-stone-800 hover:border-amber-500/70 shadow-xl">
-            <div className="relative shrink-0">
+            <div className="relative shrink-0" ref={setHeadRef(0)}>
               <CharacterAvatar
                 characterId={activeUser?.avatarId || pSouth.id}
                 characterName={activeUser?.name || pSouth.name}
@@ -283,6 +412,87 @@ export const Table: React.FC<TableProps> = ({
                 Pareja de {pNorth?.name || 'Norte'}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* YOUR EYES & SEÑAS: choose where you look and pass señas when nobody is watching */}
+        {pSouth && onSetHumanGaze && (
+          <div className="mb-1 flex flex-col items-center gap-1 max-w-full px-2">
+            <div className="flex flex-wrap items-center justify-center gap-1 bg-stone-950/90 border border-sky-600/60 rounded-full px-2 py-1 shadow-lg">
+              <span className="text-[10px] font-mono font-black text-sky-300 mr-0.5">👀 Mirar a:</span>
+              {([3, 2, 1, -1] as GazeTarget[]).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => onSetHumanGaze(t)}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border transition cursor-pointer ${
+                    humanGaze === t
+                      ? 'bg-sky-500 text-stone-950 border-sky-300'
+                      : 'bg-stone-900 text-stone-300 border-stone-700 hover:border-sky-400'
+                  }`}
+                >
+                  {t === -1 ? '🃏 Mis cartas' : t === 2 ? `🤝 ${players[2]?.name || 'Norte'}` : `${t === 3 ? '⬅️' : '➡️'} ${players[t]?.name || SEAT_NAMES[t]}`}
+                </button>
+              ))}
+            </div>
+
+            {(() => {
+              const watchers = [1, 3].filter((s) => gazes[s] === 0);
+              const partnerLooking = gazes[2] === 0;
+              return (
+                <div className="flex flex-wrap items-center justify-center gap-1 bg-stone-950/90 border border-amber-600/60 rounded-2xl px-2 py-1 shadow-lg">
+                  <span
+                    className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                      partnerLooking ? 'bg-emerald-600 text-white' : 'bg-stone-800 text-stone-400'
+                    }`}
+                  >
+                    {partnerLooking ? '🤝 Tu compañero te mira' : '🤝 Tu compañero no te mira'}
+                  </span>
+                  <span
+                    className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                      watchers.length ? 'bg-rose-600 text-white animate-pulse' : 'bg-stone-800 text-stone-400'
+                    }`}
+                  >
+                    {watchers.length
+                      ? `👁️ Te vigila: ${watchers.map((s) => players[s]?.name).join(' y ')}`
+                      : '😎 Ningún rival te mira'}
+                  </span>
+                  {onQuickSeña &&
+                    (señasEnabled && validSeñas.length > 0 ? (
+                      validSeñas.map((seña) => (
+                        <button
+                          key={seña.id}
+                          type="button"
+                          onClick={() => onQuickSeña(seña)}
+                          className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-black bg-amber-500 hover:bg-amber-400 text-stone-950 border border-stone-950 shadow cursor-pointer active:scale-95"
+                          title={`${seña.gesture} — ${seña.meaning}`}
+                        >
+                          🤫 {señaShortLabel(seña.id)}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-[10px] font-mono text-stone-500 italic">
+                        {señasEnabled ? 'Sin jugada para señas' : 'Señas no disponibles ahora'}
+                      </span>
+                    ))}
+                </div>
+              );
+            })()}
+
+            {((intelYourTeam[0] || []).length > 0 || (intelRivals[0] || []).length > 0) && (
+              <div className="flex flex-wrap justify-center gap-1">
+                {(intelYourTeam[0] || []).length > 0 && (
+                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-900/90 text-emerald-200 border border-emerald-500/60">
+                    🤝 Tu compañero sabe: {(intelYourTeam[0] || []).map(señaShortLabel).join(' · ')}
+                  </span>
+                )}
+                {(intelRivals[0] || []).length > 0 && (
+                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-rose-950/90 text-rose-200 border border-rose-500/60">
+                    ⚠️ Los rivales saben: {(intelRivals[0] || []).map(señaShortLabel).join(' · ')}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
 

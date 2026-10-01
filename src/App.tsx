@@ -43,6 +43,31 @@ import { MultiplayerRoom } from './types';
 import { getMusRank } from './musLogic';
 import { RecuentoOverlay } from './components/RecuentoOverlay';
 import { computeHandRecountPlan, HandRecountPlan } from './recuentoCalculator';
+import {
+  GazeTarget,
+  IntelState,
+  emptyIntel,
+  addIntel,
+  pickNextGaze,
+  randomGazeDuration,
+  getValidSeñas,
+  partnerOf,
+  opponentsOf,
+  señaShortLabel,
+} from './gazeSystem';
+
+// Phases in which señas can be passed around the table
+const SEÑA_PHASES: LancePhase[] = [
+  'mus_dialog',
+  'discarding',
+  'grande',
+  'chica',
+  'pares_precheck',
+  'pares_bet',
+  'juego_precheck',
+  'juego_bet',
+  'punto_bet',
+];
 
 export default function App() {
   // Screen views: 'select' | 'bracket' | 'game' | 'multiplayer' | 'tutorial'
@@ -95,6 +120,17 @@ export default function App() {
   const handWonRef = React.useRef<boolean>(false);
   const isTransitioningRef = React.useRef<boolean>(false);
   const pendingTimersRef = React.useRef<number[]>([]);
+
+  // Gaze & señas: where each seat is looking and what each team knows about the others' cards
+  const [gazes, setGazes] = useState<GazeTarget[]>([-1, -1, -1, -1]);
+  const [intel, setIntel] = useState<IntelState>(emptyIntel());
+  const gazesRef = useRef<GazeTarget[]>(gazes);
+  const intelRef = useRef<IntelState>(intel);
+  const playersRef = useRef<Player[]>([]);
+  const phaseRef = useRef<LancePhase>('dealing');
+  const showAllCardsRef = useRef<boolean>(false);
+  const nextGazeChangeRef = useRef<number[]>([0, 0, 0, 0]);
+  const señasSentRef = useRef<Set<string>>(new Set());
 
   const clearAllPendingTimers = () => {
     pendingTimersRef.current.forEach((t) => clearTimeout(t));
@@ -354,6 +390,7 @@ export default function App() {
 
     setDeck(newDeck);
     setPlayers(dealtPlayers);
+    resetSeñasForNewCards();
     setShowAllCards(false);
     setManoIndex(mano);
     setCurrentTurn(mano);
@@ -402,6 +439,141 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [currentTurn, phase, view, gameSpeed]);
+
+  // Keep refs in sync so the gaze ticker always reads the latest table state
+  gazesRef.current = gazes;
+  intelRef.current = intel;
+  playersRef.current = players;
+  phaseRef.current = phase;
+  showAllCardsRef.current = showAllCards;
+
+  const updateGazes = (next: GazeTarget[]) => {
+    gazesRef.current = next;
+    setGazes(next);
+  };
+
+  const updateIntel = (next: IntelState) => {
+    intelRef.current = next;
+    setIntel(next);
+  };
+
+  const resetSeñasForNewCards = () => {
+    señasSentRef.current = new Set();
+    updateIntel(emptyIntel());
+  };
+
+  // Briefly show a seña gesture above a seated player (only when your team saw it)
+  const flashGesture = (seat: number, gesture: string) => {
+    setPlayers((prev) => prev.map((p, i) => (i === seat ? { ...p, lastGesture: gesture } : p)));
+    window.setTimeout(() => {
+      setPlayers((prev) =>
+        prev.map((p, i) => (i === seat && p.lastGesture === gesture ? { ...p, lastGesture: null } : p))
+      );
+    }, 2200);
+  };
+
+  const sayBriefly = (seat: number, text: string, ms = 2400) => {
+    setPlayers((prev) => prev.map((p, i) => (i === seat ? { ...p, currentSpeech: text } : p)));
+    window.setTimeout(() => {
+      setPlayers((prev) =>
+        prev.map((p, i) => (i === seat && p.currentSpeech === text ? { ...p, currentSpeech: null } : p))
+      );
+    }, ms);
+  };
+
+  const getSeenSeñaQuote = (seat: number) => {
+    const char = PC_MUS_CHARACTERS.find((c) => c.id === playersRef.current[seat]?.id);
+    const lines = char?.dialogs.señaSeen || [];
+    return lines[Math.floor(Math.random() * lines.length)] || '¡Te he visto la seña!';
+  };
+
+  // An AI player passes a seña to its partner. Whoever is looking at the sender at that moment sees it.
+  const performAISeña = (seat: number, seña: Seña) => {
+    const table = playersRef.current;
+    const sender = table[seat];
+    if (!sender) return;
+    const currentGazes = gazesRef.current;
+    const team = sender.team;
+    const watchers = opponentsOf(seat).filter((o) => currentGazes[o] === seat);
+    señasSentRef.current.add(`${seat}:${seña.id}`);
+
+    let nextIntel = addIntel(intelRef.current, team, seat, seña.id);
+    if (watchers.length) {
+      nextIntel = addIntel(nextIntel, team === 0 ? 1 : 0, seat, seña.id);
+    }
+    updateIntel(nextIntel);
+
+    const label = señaShortLabel(seña.id);
+    if (team === 0) {
+      // Your partner (North) signals you: you were looking at them, so you see it
+      flashGesture(seat, seña.gesture);
+      sound.playSeña();
+      if (watchers.length) {
+        const catcher = watchers[0];
+        const quote = getSeenSeñaQuote(catcher);
+        sayBriefly(catcher, quote);
+        voiceEngine.speakCharacter(table[catcher].id, quote);
+        setRecentEvent(
+          `🤝 ${sender.name} te pasa seña: ${label}... ¡pero ${watchers.map((w) => table[w].name).join(' y ')} lo ha visto!`
+        );
+      } else {
+        setRecentEvent(`🤝 ${sender.name} te pasa seña a escondidas: «${label}» (${seña.meaning}).`);
+      }
+      return;
+    }
+
+    // Rival seña: only visible to you if you or your partner were watching
+    if (watchers.includes(0)) {
+      flashGesture(seat, seña.gesture);
+      sound.playSeña();
+      setRecentEvent(`🕵️ ¡Has cazado la seña de ${sender.name}! ${seña.gesture} → ${seña.meaning}.`);
+    } else if (watchers.includes(2)) {
+      flashGesture(seat, seña.gesture);
+      sound.playSeña();
+      sayBriefly(2, '*(He visto la seña del rival...)*');
+      setRecentEvent(`🕵️ ${table[2].name} ha cazado la seña de ${sender.name}: «${label}».`);
+    }
+  };
+
+  // Gaze ticker: AIs turn their necks randomly and pass señas when nobody is watching
+  useEffect(() => {
+    if (view !== 'game') return;
+    const interval = window.setInterval(() => {
+      const table = playersRef.current;
+      if (table.length !== 4) return;
+      const now = Date.now();
+
+      // 1. Random neck movements
+      let changed = false;
+      const next = [...gazesRef.current] as GazeTarget[];
+      for (let seat = 1; seat < 4; seat++) {
+        if (now >= nextGazeChangeRef.current[seat]) {
+          next[seat] = pickNextGaze(seat, next[seat]);
+          nextGazeChangeRef.current[seat] = now + randomGazeDuration();
+          changed = true;
+        }
+      }
+      if (changed) updateGazes(next);
+
+      // 2. AI señas
+      if (!SEÑA_PHASES.includes(phaseRef.current) || showAllCardsRef.current) return;
+      for (let seat = 1; seat < 4; seat++) {
+        const p = table[seat];
+        const pending = getValidSeñas(p.cards).filter((s) => !señasSentRef.current.has(`${seat}:${s.id}`));
+        if (!pending.length) continue;
+        // The partner has to be looking at the sender to receive the seña
+        if (gazesRef.current[partnerOf(seat)] !== seat) continue;
+        const watched = opponentsOf(seat).some((o) => gazesRef.current[o] === seat);
+        // Careful players wait until nobody watches; careless ones sometimes get caught
+        const chance = watched ? 0.03 + p.bluffRate * 0.05 : 0.35;
+        if (Math.random() < chance) {
+          performAISeña(seat, pending[0]);
+          break; // one seña per tick keeps it readable
+        }
+      }
+    }, 450);
+    return () => clearInterval(interval);
+  }, [view]);
 
   // Execute AI action based on phase
   const handleAITurn = () => {
@@ -455,12 +627,17 @@ export default function App() {
         : 'punto';
 
     const currentLanceBet = lanceBets[lanceKey];
+    const teamIntel = intelRef.current[aiPlayer.team];
     const decision = decideLanceAction(
       aiPlayer,
       lanceKey as any,
       currentLanceBet,
       aiPlayer.team === 0 ? scoreTeam0.piedras : scoreTeam1.piedras,
-      aiPlayer.team === 0 ? scoreTeam1.piedras : scoreTeam0.piedras
+      aiPlayer.team === 0 ? scoreTeam1.piedras : scoreTeam0.piedras,
+      {
+        partnerSeñas: teamIntel[partnerOf(currentTurn)] || [],
+        rivalSeñas: opponentsOf(currentTurn).flatMap((o) => teamIntel[o] || []),
+      }
     );
 
     // Apply speech
@@ -518,6 +695,7 @@ export default function App() {
     });
 
     setPlayers(updatedPlayers);
+    resetSeñasForNewCards();
     setRecentEvent('Se han repartido los nuevos naipes de descarte. Nueva consulta de Mus.');
     setPhase('mus_dialog');
     setCurrentTurn(manoIndex);
@@ -906,45 +1084,43 @@ export default function App() {
     setCameo(randomCameo);
   };
 
-  // Handle Seña sent by user
-  const handleSendSeña = (seña: Seña, isTruthful: boolean) => {
+  // Handle Seña sent by user: your partner must be looking at you, and any rival looking will catch it
+  const handleSendSeña = (seña: Seña, _isTruthful: boolean = true) => {
+    if (!SEÑA_PHASES.includes(phaseRef.current) || showAllCardsRef.current) {
+      setRecentEvent('Ahora no es momento de pasar señas.');
+      return;
+    }
     sound.playSeña();
-    const partner = players[2];
-    const rival1 = players[1];
-    const rival2 = players[3];
+    const table = playersRef.current;
+    const currentGazes = gazesRef.current;
+    const partner = table[2];
+    const partnerLooking = currentGazes[2] === 0;
+    const watchers = [1, 3].filter((s) => currentGazes[s] === 0);
+    const label = señaShortLabel(seña.id);
 
-    // Show gesture tag above player
-    setPlayers((prev) =>
-      prev.map((p, i) => (i === 0 ? { ...p, lastGesture: seña.gesture } : p))
-    );
+    let nextIntel = intelRef.current;
+    if (partnerLooking) nextIntel = addIntel(nextIntel, 0, 0, seña.id);
+    if (watchers.length) nextIntel = addIntel(nextIntel, 1, 0, seña.id);
+    updateIntel(nextIntel);
 
-    // 25% chance a rival catches the seña!
-    const wasCaught = Math.random() < 0.28;
-
-    if (wasCaught) {
-      const catcher = Math.random() < 0.5 ? rival1 : rival2;
-      const catcherChar = PC_MUS_CHARACTERS.find((c) => c.id === catcher.id)!;
-      const quote = catcherChar.dialogs.señaSeen[0] || '¡Te he visto la seña!';
-
-      setTimeout(() => {
-        setPlayers((prev) =>
-          prev.map((p) => (p.id === catcher.id ? { ...p, currentSpeech: quote } : p))
-        );
-        voiceEngine.speakCharacter(catcher.id, quote);
-        setRecentEvent(`¡${catcher.name} ha pillado tu seña! «${quote}»`);
-      }, 600);
+    if (watchers.length) {
+      const catcher = watchers[0];
+      const quote = getSeenSeñaQuote(catcher);
+      window.setTimeout(() => {
+        sayBriefly(catcher, quote);
+        voiceEngine.speakCharacter(table[catcher].id, quote);
+      }, 500);
+      const names = watchers.map((w) => table[w].name).join(' y ');
+      setRecentEvent(
+        partnerLooking
+          ? `👁️ ¡${names} te ha pillado la seña «${label}»! Tu compañero también la ha visto.`
+          : `👁️ ¡${names} te ha pillado la seña «${label}» y tu compañero ni te miraba!`
+      );
+    } else if (partnerLooking) {
+      window.setTimeout(() => sayBriefly(2, '*(Entendido, compañero...)*'), 600);
+      setRecentEvent(`🤫 Seña limpia: ${partner?.name} sabe que llevas «${label}». Nadie más lo ha visto.`);
     } else {
-      // Partner understood the seña
-      setTimeout(() => {
-        setPlayers((prev) =>
-          prev.map((p) =>
-            p.seat === 2
-              ? { ...p, currentSpeech: '*(Entendido, compañero...)*' }
-              : p
-          )
-        );
-        setRecentEvent(`Tu compañero ${partner.name} ha captado tu seña.`);
-      }, 700);
+      setRecentEvent(`🙈 ${partner?.name} no te estaba mirando: la seña «${label}» se ha perdido.`);
     }
   };
 
@@ -1189,6 +1365,16 @@ export default function App() {
                 prev === 'tranquilo' ? 'normal' : prev === 'normal' ? 'rapido' : 'tranquilo'
               )
             }
+            gazes={gazes}
+            intel={intel}
+            onSetHumanGaze={(t) => {
+              const next = [...gazesRef.current] as GazeTarget[];
+              next[0] = t;
+              updateGazes(next);
+            }}
+            validSeñas={getValidSeñas(players[0]?.cards || [])}
+            señasEnabled={SEÑA_PHASES.includes(phase) && !showAllCards}
+            onQuickSeña={(seña) => handleSendSeña(seña, true)}
           />
 
           {/* Recuento Tradicional de Tantos (Paso a paso, animado y pausado) */}
