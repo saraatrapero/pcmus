@@ -149,6 +149,32 @@ export const FournierCard: React.FC<FournierCardProps> = ({
     );
   };
 
+  // Long sword / club, as drawn in the pips of the classic Spanish deck
+  const longGlyph = (cls: string) =>
+    suit === 'espadas' ? (
+      <svg viewBox="0 0 20 100" className={cls} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+        <path d="M10 1 L13 7 V72 H7 V7 Z" fill="#b9d3f2" stroke="#0f2c55" strokeWidth="1.4" strokeLinejoin="round" />
+        <line x1="10" y1="7" x2="10" y2="70" stroke="#2d5fa3" strokeWidth="1.1" />
+        <path d="M1 71 Q10 76 19 71 L19 75 Q10 80 1 75 Z" fill="#1d4f91" stroke="#0f2c55" strokeWidth="1.2" strokeLinejoin="round" />
+        <path d="M4.5 76 Q2 82 6 86" stroke="#1d4f91" strokeWidth="1.6" fill="none" />
+        <path d="M15.5 76 Q18 82 14 86" stroke="#1d4f91" strokeWidth="1.6" fill="none" />
+        <rect x="8" y="77" width="4" height="13" rx="1.2" fill="#8a5a1c" stroke="#3d240c" strokeWidth="0.9" />
+        <path d="M8 80 L12 82 M8 84 L12 86" stroke="#3d240c" strokeWidth="0.7" />
+        <circle cx="10" cy="94" r="3.6" fill="#e8b02a" stroke="#6b3d03" strokeWidth="1" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 20 100" className={cls} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+        <path d="M7.4 98 L5 14 Q4.5 2 10 1.5 Q15.5 2 15 14 L12.6 98 Q10 100 7.4 98 Z" fill="#a8692a" stroke="#3d240c" strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M7.5 6 Q10 4 12.5 6" stroke="#d39a55" strokeWidth="1.1" fill="none" />
+        <ellipse cx="7.6" cy="24" rx="1.5" ry="1.1" fill="#5c3610" />
+        <ellipse cx="12.4" cy="40" rx="1.5" ry="1.1" fill="#5c3610" />
+        <ellipse cx="8" cy="58" rx="1.3" ry="1" fill="#5c3610" />
+        <ellipse cx="11.8" cy="76" rx="1.2" ry="0.9" fill="#5c3610" />
+        <path d="M5.2 21 Q0.5 18 0.8 11 Q5 14 5.4 19" fill="#2d7a3a" stroke="#164d21" strokeWidth="0.8" />
+        <path d="M14.8 47 Q19.5 44 19.2 37 Q15 40 14.6 45" fill="#2d7a3a" stroke="#164d21" strokeWidth="0.8" />
+      </svg>
+    );
+
   // Small icon used in the corners and on the figures
   const renderSuitIcon = (isLarge = false) =>
     suitGlyph(isLarge ? (isHandSize ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-7 h-7') : isHandSize ? 'w-4 h-4' : 'w-3 h-3');
@@ -445,6 +471,37 @@ export const FournierCard: React.FC<FournierCardProps> = ({
         </div>
       );
     }
+    // Espadas and bastos are drawn like the classic deck: long and crossed diagonally
+    if ((suit === 'espadas' || suit === 'bastos') && number <= 7) {
+      // Pairs crossed in X, side by side, so each one can still be counted
+      const tilt = number <= 3 ? 27 : 17;
+      const xs = number <= 3 ? [50] : number <= 5 ? [27, 73] : [16, 50, 84];
+      const crossed: { x: number; rot: number }[] =
+        number === 1 ? [{ x: 50, rot: 0 }] : xs.flatMap((x) => [{ x, rot: tilt }, { x, rot: -tilt }]);
+      // Odd numbers add one upright in the middle
+      if (number % 2 === 1 && number > 1) crossed.push({ x: 50, rot: 0 });
+      const length = number === 1 ? 92 : number <= 3 ? 88 : 84;
+      return (
+        <div className="absolute inset-x-[18%] top-[7%] bottom-[7%]">
+          {crossed.map(({ x, rot }, i) => (
+            <div
+              key={i}
+              className="absolute"
+              style={{
+                left: `${x}%`,
+                top: '50%',
+                height: `${length}%`,
+                aspectRatio: number === 1 ? '1 / 3.6' : number <= 3 ? '1 / 5' : '1 / 6',
+                transform: `translate(-50%, -50%) rotate(${rot}deg)`,
+              }}
+            >
+              {longGlyph('w-full h-full drop-shadow-[0_1px_0_rgba(0,0,0,0.3)]')}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     const layout = PIP_LAYOUTS[number];
     if (!layout) return null;
     return (
