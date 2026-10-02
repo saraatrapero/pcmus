@@ -188,10 +188,10 @@ export const Table: React.FC<TableProps> = ({
   // Where the deck rests: in front of the mano
   const deckPosition = (
     {
-      0: 'left-1/2 bottom-[17%] -translate-x-1/2',
-      1: 'right-[22%] top-[62%]',
-      2: 'left-1/2 top-[19%] -translate-x-1/2',
-      3: 'left-[22%] top-[62%]',
+      0: 'left-1/2 bottom-[10%] -translate-x-1/2',
+      1: 'right-[20%] top-[58%]',
+      2: 'left-[60%] top-[12%]',
+      3: 'left-[20%] top-[58%]',
     } as Record<number, string>
   )[manoIndex];
 
@@ -328,126 +328,137 @@ export const Table: React.FC<TableProps> = ({
         ) : null}
       </div>
 
-      {/* 4. THE ROOM: West | (North + vertical table) | East */}
-      <div className="relative z-20 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0.5 sm:gap-2 px-1 sm:px-4 pt-1">
-        {/* WEST */}
-        <div className="flex justify-end">
-          {pWest && <SeatedPlayer player={pWest} seatPosition="west" {...seatProps(3)} />}
-        </div>
+      {/* 4. THE ROOM IN 3D: the table lies flat in perspective, seen from your chair.
+             The players sit behind its edges (the table covers their lap) and everything
+             on the felt is foreshortened like a real table. */}
+      <div
+        className="relative z-20 w-full h-[290px] sm:h-[390px] md:h-[420px] overflow-visible"
+        style={{ perspective: '900px', perspectiveOrigin: '50% -20%' }}
+      >
+        {/* PARTNER (far end of the table, further away so smaller) */}
+        {pNorth && (
+          <div className="absolute left-1/2 top-[3%] sm:top-[5%] z-10 -translate-x-1/2 scale-[0.72] sm:scale-[0.8] origin-top">
+            <SeatedPlayer player={pNorth} seatPosition="north" {...seatProps(2)} />
+          </div>
+        )}
+        {/* RIVALS (left and right sides, mid-depth) */}
+        {pWest && (
+          <div className="absolute left-[0%] sm:left-[11%] top-[20%] sm:top-[25%] z-10 scale-[0.74] sm:scale-[0.9] origin-top-left">
+            <SeatedPlayer player={pWest} seatPosition="west" {...seatProps(3)} />
+          </div>
+        )}
+        {pEast && (
+          <div className="absolute right-[0%] sm:right-[11%] top-[20%] sm:top-[25%] z-10 scale-[0.74] sm:scale-[0.9] origin-top-right">
+            <SeatedPlayer player={pEast} seatPosition="east" {...seatProps(1)} />
+          </div>
+        )}
 
-        {/* CENTER COLUMN */}
-        <div className="flex flex-col items-center">
-          {pNorth && (
-            <div className="relative z-10 -mb-3">
-              <SeatedPlayer player={pNorth} seatPosition="north" {...seatProps(2)} />
-            </div>
-          )}
-
-          {/* VERTICAL MUS TABLE: wooden rail + green baize, slightly tilted for perspective */}
-          <div className="relative" style={{ perspective: '900px' }}>
-            {/* Floor shadow */}
-            <div className="absolute -inset-x-4 -bottom-5 h-16 rounded-[50%] bg-black/60 blur-xl" />
+        {/* THE TABLE (3D plane) */}
+        <div
+          className="absolute left-1/2 top-[60%] sm:top-[64%] z-20 w-[96%] sm:w-[78%] max-w-[760px] aspect-[1.75/1] pointer-events-none"
+          style={{ transform: 'translate(-50%, -50%) rotateX(58deg)', transformStyle: 'preserve-3d' }}
+        >
+          {/* Shadow cast on the floor */}
+          <div
+            className="absolute -inset-[6%] rounded-[50%] bg-black/70 blur-2xl"
+            style={{ transform: 'translateZ(-110px)' }}
+          />
+          {/* Table edge / thickness */}
+          <div
+            className="absolute inset-0 rounded-[50%]"
+            style={{
+              transform: 'translateZ(-16px)',
+              background: 'linear-gradient(180deg, #3b1b07, #1e0d03)',
+              boxShadow: '0 0 0 2px #140801',
+            }}
+          />
+          <div
+            className="absolute inset-0 rounded-[50%]"
+            style={{ transform: 'translateZ(-8px)', background: '#4a230b' }}
+          />
+          {/* Wooden rail */}
+          <div
+            className="absolute inset-0 rounded-[50%] p-[2.4%]"
+            style={{
+              background:
+                'repeating-linear-gradient(95deg, rgba(0,0,0,0.13) 0px, rgba(0,0,0,0.13) 2px, transparent 2px, transparent 11px), radial-gradient(ellipse at 50% 30%, #a35f2a 0%, #6e3712 55%, #43200a 100%)',
+              boxShadow: 'inset 0 2px 0 rgba(255,214,150,0.35), inset 0 -3px 6px rgba(0,0,0,0.6)',
+            }}
+          >
+            {/* Felt */}
             <div
-              className="relative w-[min(44vw,210px)] sm:w-[270px] md:w-[310px] aspect-[3/4] rounded-[48%/40%] p-[10px] sm:p-[14px] shadow-[0_18px_30px_rgba(0,0,0,0.75)]"
+              className="relative w-full h-full rounded-[50%] overflow-hidden"
               style={{
-                transform: 'rotateX(10deg)',
-                transformOrigin: '50% 60%',
-                background:
-                  'repeating-linear-gradient(100deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 9px), linear-gradient(160deg, #8a4b1f 0%, #5c2d0e 45%, #3b1b07 100%)',
+                background: 'radial-gradient(ellipse 65% 60% at 50% 45%, #33935a 0%, #21703f 55%, #12462a 100%)',
+                boxShadow: 'inset 0 0 30px rgba(0,0,0,0.75), inset 0 0 4px rgba(0,0,0,0.9)',
               }}
             >
-              {/* Rail highlight */}
-              <div className="absolute inset-[3px] rounded-[48%/40%] border border-amber-300/30 pointer-events-none" />
-              {/* Felt */}
+              {/* Baize fibre texture */}
               <div
-                className="relative w-full h-full rounded-[46%/38%] overflow-hidden shadow-[inset_0_0_28px_rgba(0,0,0,0.75),inset_0_0_4px_rgba(0,0,0,0.9)]"
+                className="absolute inset-0 opacity-25 mix-blend-overlay"
                 style={{
-                  background:
-                    'radial-gradient(ellipse 70% 55% at 50% 45%, #2f8a52 0%, #1f6a3c 55%, #134a29 100%)',
+                  backgroundImage:
+                    'repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 3px), repeating-linear-gradient(-45deg, rgba(0,0,0,0.12) 0 1px, transparent 1px 3px)',
                 }}
-              >
-                {/* Baize fibre texture */}
-                <div
-                  className="absolute inset-0 opacity-25 mix-blend-overlay pointer-events-none"
-                  style={{
-                    backgroundImage:
-                      'repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 3px), repeating-linear-gradient(-45deg, rgba(0,0,0,0.12) 0 1px, transparent 1px 3px)',
-                  }}
-                />
-                {/* Lamp reflection */}
-                <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_40%_30%_at_50%_42%,rgba(255,230,170,0.22),transparent_70%)]" />
-                {/* Stitched inner line */}
-                <div className="absolute inset-[7%] rounded-[46%/38%] border border-dashed border-emerald-200/15 pointer-events-none" />
+              />
+              {/* Light from the lamp above the table */}
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_38%_42%_at_50%_45%,rgba(255,232,170,0.26),transparent_70%)]" />
+              {/* Stitched inner line */}
+              <div className="absolute inset-[6%] rounded-[50%] border border-dashed border-emerald-200/20" />
 
-                {/* North's cards */}
-                {pNorth && (
-                  <div className="absolute left-1/2 top-[3%] -translate-x-1/2 scale-[0.8] sm:scale-100 origin-top">
-                    <CardFan cards={pNorth.cards} rotation={180} showAllCards={showAllCards} />
-                  </div>
-                )}
-                {/* West's cards */}
-                {pWest && (
-                  <div className="absolute left-[-6%] sm:left-[-2%] top-1/2 -translate-y-1/2 scale-[0.75] sm:scale-100">
-                    <CardFan cards={pWest.cards} rotation={90} showAllCards={showAllCards} />
-                  </div>
-                )}
-                {/* East's cards */}
-                {pEast && (
-                  <div className="absolute right-[-6%] sm:right-[-2%] top-1/2 -translate-y-1/2 scale-[0.75] sm:scale-100">
-                    <CardFan cards={pEast.cards} rotation={-90} showAllCards={showAllCards} />
-                  </div>
-                )}
-
-                {/* Deck resting in front of the mano */}
-                <div className={`absolute ${deckPosition} transition-all duration-700`} title="Baraja Española de 40 naipes">
-                  <div className="relative w-7 h-10 sm:w-8 sm:h-12 rotate-[-14deg]">
-                    {[3, 2, 1, 0].map((o) => (
-                      <div
-                        key={o}
-                        className="absolute inset-0 rounded-md border border-stone-950 bg-gradient-to-br from-red-800 to-red-950 shadow-[1px_2px_3px_rgba(0,0,0,0.6)]"
-                        style={{ transform: `translate(${o * 1}px, ${-o * 1.2}px)` }}
-                      >
-                        <div className="absolute inset-0.5 rounded border border-amber-400/40" />
-                      </div>
-                    ))}
-                  </div>
+              {/* Cards lying face down in front of each player */}
+              {pNorth && (
+                <div className="absolute left-1/2 top-[5%] -translate-x-1/2 scale-[0.75] sm:scale-100 origin-top">
+                  <CardFan cards={pNorth.cards} rotation={180} showAllCards={showAllCards} />
                 </div>
-
-                {/* Pot: the stones at stake in the current lance */}
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" title={betState.currentBet > 0 ? `En juego: ${betState.isOrdago ? 'Órdago' : betState.currentBet + ' piedras'}` : 'Bote vacío'}>
-                  <div className="relative w-11 h-11 sm:w-20 sm:h-20 rounded-full bg-[radial-gradient(circle_at_40%_35%,#7a4a22,#4a2a10_70%)] border-2 border-[#2b1606] shadow-[inset_0_3px_8px_rgba(0,0,0,0.7),0_3px_6px_rgba(0,0,0,0.5)]">
-                    <StonePile count={potStones} radius={14} className="left-1/2 top-1/2" />
-                    {betState.isOrdago && (
-                      <span className="absolute inset-0 flex items-center justify-center text-2xl animate-pulse">🔥</span>
-                    )}
-                  </div>
+              )}
+              {pWest && (
+                <div className="absolute left-[4%] top-1/2 -translate-y-1/2 scale-[0.6] sm:scale-100 origin-left">
+                  <CardFan cards={pWest.cards} rotation={90} showAllCards={showAllCards} />
                 </div>
+              )}
+              {pEast && (
+                <div className="absolute right-[4%] top-1/2 -translate-y-1/2 scale-[0.6] sm:scale-100 origin-right">
+                  <CardFan cards={pEast.cards} rotation={-90} showAllCards={showAllCards} />
+                </div>
+              )}
 
-                {/* Each team's stones, next to its players */}
-                <StonePile
-                  count={scoreTeam0?.piedras || 0}
-                  className="left-[70%] top-[80%]"
-                  title={`Piedras de tu pareja: ${scoreTeam0?.piedras || 0}`}
-                />
-                <StonePile
-                  count={scoreTeam1?.piedras || 0}
-                  className="left-[30%] top-[22%]"
-                  title={`Piedras rivales: ${scoreTeam1?.piedras || 0}`}
-                />
+              {/* Deck resting in front of the mano */}
+              <div className={`absolute ${deckPosition} transition-all duration-700`}>
+                <div className="relative w-7 h-10 sm:w-9 sm:h-13 rotate-[-14deg]">
+                  {[3, 2, 1, 0].map((o) => (
+                    <div
+                      key={o}
+                      className="absolute inset-0 rounded-md border border-stone-950 bg-gradient-to-br from-red-800 to-red-950 shadow-[1px_2px_3px_rgba(0,0,0,0.6)]"
+                      style={{ transform: `translate(${o * 1}px, ${-o * 1.2}px)` }}
+                    >
+                      <div className="absolute inset-0.5 rounded border border-amber-400/40" />
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              {/* Pot: the stones at stake in the current lance */}
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+                <div className="relative w-10 h-10 sm:w-20 sm:h-20 rounded-full bg-[radial-gradient(circle_at_40%_35%,#7a4a22,#4a2a10_70%)] border-2 border-[#2b1606] shadow-[inset_0_3px_8px_rgba(0,0,0,0.7),0_3px_6px_rgba(0,0,0,0.5)]">
+                  <StonePile count={potStones} radius={14} className="left-1/2 top-1/2" />
+                  {betState.isOrdago && (
+                    <span className="absolute inset-0 flex items-center justify-center text-2xl animate-pulse">🔥</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Each team's stones, next to its players */}
+              <StonePile count={scoreTeam0?.piedras || 0} className="left-[68%] top-[78%]" />
+              <StonePile count={scoreTeam1?.piedras || 0} className="left-[30%] top-[24%]" />
             </div>
           </div>
-        </div>
-
-        {/* EAST */}
-        <div className="flex justify-start">
-          {pEast && <SeatedPlayer player={pEast} seatPosition="east" {...seatProps(1)} />}
         </div>
       </div>
 
       {/* 5. SOUTH: your hand rests over the near edge of the table */}
       {pSouth && (
-        <div className="relative z-30 -mt-3 sm:-mt-5 flex flex-col items-center">
+        <div className="relative z-30 -mt-6 sm:-mt-20 flex flex-col items-center">
           <CartoonPlayerHands
             cards={pSouth.cards}
             selectedIndices={pSouth.selectedToDiscard}
