@@ -108,6 +108,21 @@ export interface MultiplayerRoom {
   updatedAt: number;
   chat: ChatMessage[];
   currentHandData?: any;
+  hasPassword?: boolean; // the server never sends the password itself
+  stateVersion?: number; // version of the shared game snapshot
+  state?: any; // shared game snapshot (absolute seats), only sent to seated players
+  hostOnline?: boolean;
+}
+
+// An action sent by a seated player to the host, who runs the game
+export interface NetAction {
+  seq: number;
+  seat: number; // absolute seat
+  kind: 'action' | 'discard' | 'seña' | 'gaze';
+  action?: string;
+  indices?: number[];
+  señaId?: string;
+  target?: number;
 }
 
 export interface MultiplayerActionPayload {

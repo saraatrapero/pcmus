@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MultiplayerRoom, RoomSeat } from '../types';
 import { multiplayerService } from '../multiplayer/multiplayerService';
 import { PC_MUS_CHARACTERS, CharacterInfo } from '../characters';
@@ -34,6 +34,8 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   const [joinCodeInput, setJoinCodeInput] = useState<string>('');
   const [joinPasswordInput, setJoinPasswordInput] = useState<string>('');
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<boolean>(false);
 
   // Chat input
   const [chatInput, setChatInput] = useState<string>('');
@@ -42,58 +44,92 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   const localPlayerId = multiplayerService.getPlayerId();
   const selectedChar = PC_MUS_CHARACTERS.find((c) => c.id === selectedCharId) || PC_MUS_CHARACTERS[0];
 
-  // Subscribe to public rooms list
+  // Latest callback without re-subscribing on every parent render
+  const onStartGameRef = useRef(onStartGame);
+  onStartGameRef.current = onStartGame;
+  const startedRef = useRef<boolean>(false);
+
+  // Subscribe to public rooms list (polls the server)
   useEffect(() => {
-    const unsubscribe = multiplayerService.subscribeToLobby((rooms) => {
-      setPublicRooms(rooms);
-    });
+    const unsubscribe = multiplayerService.subscribeToLobby(
+      (rooms) => {
+        setPublicRooms(rooms);
+        setServerError(null);
+      },
+      (err) => setServerError(err.message)
+    );
     return () => unsubscribe();
   }, []);
 
-  // Subscribe to current room if active
+  // Subscribe to current room: everybody (host included) enters the game when it starts
   useEffect(() => {
-    if (!currentRoom) return;
-    const unsubscribe = multiplayerService.subscribeToRoom(currentRoom.id, (updatedRoom) => {
-      setCurrentRoom(updatedRoom);
-      if (updatedRoom.status === 'playing') {
-        // Find local seat index
+    if (!currentRoom?.id) return;
+    startedRef.current = false;
+    const unsubscribe = multiplayerService.subscribeToRoom(
+      currentRoom.id,
+      (updatedRoom) => {
+        setCurrentRoom(updatedRoom);
+        setServerError(null);
         const mySeat = updatedRoom.seats.find((s) => s.playerId === localPlayerId);
-        const seatIdx = mySeat ? mySeat.seatIndex : 0;
-        sound.playVictory();
-        onStartGame(updatedRoom, seatIdx);
+        if (!mySeat) {
+          // We were removed from the room
+          setCurrentRoom(null);
+          return;
+        }
+        if (updatedRoom.status === 'playing' && !startedRef.current) {
+          startedRef.current = true;
+          sound.playVictory();
+          multiplayerService.setActiveRoomId(updatedRoom.id);
+          onStartGameRef.current(updatedRoom, mySeat.seatIndex);
+        }
+      },
+      (err) => {
+        if (/no existe/.test(err.message)) setCurrentRoom(null);
+        setServerError(err.message);
       }
-    });
+    );
     return () => unsubscribe();
-  }, [currentRoom?.id, localPlayerId, onStartGame]);
+  }, [currentRoom?.id, localPlayerId]);
+
+  const run = async (fn: () => Promise<void>, onError: (msg: string) => void = setServerError) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } catch (err) {
+      onError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const playerInfo = () => ({ name: playerName || selectedChar.name, characterId: selectedChar.id });
 
   // Handle Create Room
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
     sound.playCard();
-    const newRoom = multiplayerService.createRoom({
-      name: createRoomName,
-      isPrivate: createIsPrivate,
-      password: createPassword || undefined,
-      targetPiedras: createTargetPiedras,
-      playerName: playerName || selectedChar.name,
-      characterId: selectedChar.id,
-      seatIndex: createSeatIndex,
+    run(async () => {
+      const newRoom = await multiplayerService.createRoom({
+        name: createRoomName,
+        isPrivate: createIsPrivate,
+        password: createPassword || undefined,
+        targetPiedras: createTargetPiedras,
+        playerName: playerInfo().name,
+        characterId: selectedChar.id,
+        seatIndex: createSeatIndex,
+      });
+      setCurrentRoom(newRoom);
     });
-    setCurrentRoom(newRoom);
   };
 
   // Handle Join Public Room
   const handleJoinPublic = (room: MultiplayerRoom) => {
     sound.playCard();
-    const res = multiplayerService.joinRoom(room.id, {
-      name: playerName || selectedChar.name,
-      characterId: selectedChar.id,
-    });
-    if (res.success && res.room) {
-      setCurrentRoom(res.room);
-    } else {
-      setJoinError(res.message);
-    }
+    setJoinError(null);
+    run(async () => {
+      setCurrentRoom(await multiplayerService.joinRoom(room.id, playerInfo()));
+    }, setJoinError);
   };
 
   // Handle Join with Code
@@ -104,29 +140,10 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
       setJoinError('Introduce un código de sala válido (ej: PRIV-1234)');
       return;
     }
-
-    const room = multiplayerService.findRoomByCode(joinCodeInput);
-    if (!room) {
-      setJoinError('No se encontró ninguna partida con ese código.');
-      return;
-    }
-
-    if (room.isPrivate && room.password && room.password !== joinPasswordInput) {
-      setJoinError('Contraseña incorrecta para esta partida privada.');
-      return;
-    }
-
     sound.playCard();
-    const res = multiplayerService.joinRoom(room.id, {
-      name: playerName || selectedChar.name,
-      characterId: selectedChar.id,
-    });
-
-    if (res.success && res.room) {
-      setCurrentRoom(res.room);
-    } else {
-      setJoinError(res.message);
-    }
+    run(async () => {
+      setCurrentRoom(await multiplayerService.joinByCode(joinCodeInput, joinPasswordInput, playerInfo()));
+    }, setJoinError);
   };
 
   // Handle Seat Switch
@@ -134,28 +151,35 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
     if (!currentRoom) return;
     const targetSeat = currentRoom.seats[seatIdx];
     if (targetSeat.occupied) return;
-
     sound.playCard();
-    multiplayerService.changeSeat(currentRoom.id, seatIdx);
+    run(async () => {
+      setCurrentRoom(await multiplayerService.changeSeat(currentRoom.id, seatIdx));
+    });
   };
 
   // Handle Fill with Bots
   const handleFillBots = () => {
     if (!currentRoom) return;
     sound.playVictory();
-    multiplayerService.fillWithBots(currentRoom.id);
+    run(async () => {
+      setCurrentRoom(await multiplayerService.fillWithBots(currentRoom.id));
+    });
   };
 
-  // Handle Start Game
+  // Handle Start Game: the room poll moves everybody (host included) into the game
   const handleStartGameClick = () => {
     if (!currentRoom) return;
-    sound.playVictory();
-    const success = multiplayerService.startRoomGame(currentRoom.id);
-    if (success) {
-      const mySeat = currentRoom.seats.find((s) => s.playerId === localPlayerId);
-      const seatIdx = mySeat ? mySeat.seatIndex : 0;
-      onStartGame(currentRoom, seatIdx);
-    }
+    run(async () => {
+      const room = await multiplayerService.startRoomGame(currentRoom.id);
+      setCurrentRoom(room);
+      const mySeat = room.seats.find((s) => s.playerId === localPlayerId);
+      if (room.status === 'playing' && mySeat && !startedRef.current) {
+        startedRef.current = true;
+        sound.playVictory();
+        multiplayerService.setActiveRoomId(room.id);
+        onStartGameRef.current(room, mySeat.seatIndex);
+      }
+    });
   };
 
   // Handle Leave Room
@@ -197,10 +221,15 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
     const isHost = currentRoom.hostPlayerId === localPlayerId;
     const occupiedCount = currentRoom.seats.filter((s) => s.occupied).length;
     const canStart = occupiedCount === 4 && isHost;
-    const seatNames = ['Sur (Tú / Anfitrión)', 'Este (Rival 1)', 'Norte (Tu Pareja)', 'Oeste (Rival 2)'];
+    const seatNames = ['Sur', 'Este', 'Norte', 'Oeste'];
 
     return (
       <div className="max-w-5xl mx-auto my-3 p-4 sm:p-6 bg-stone-900 border-2 border-amber-600 rounded-3xl shadow-2xl text-stone-100 font-sans">
+        {serverError && (
+          <div className="mb-3 p-2.5 rounded-xl bg-rose-950/80 border border-rose-600/70 text-rose-200 text-xs font-bold text-center">
+            ⚠️ {serverError}
+          </div>
+        )}
         {/* Room Header */}
         <div className="flex flex-col sm:flex-row items-center justify-between border-b border-stone-800 pb-4 mb-4 gap-3">
           <div className="flex items-center gap-3">
@@ -270,7 +299,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             <div className="flex justify-center z-10">
               <SeatCard
                 seat={currentRoom.seats[2]}
-                label="NORTE (Tu Pareja)"
+                label="NORTE (pareja de Sur)"
                 isLocalPlayer={currentRoom.seats[2]?.playerId === localPlayerId}
                 onTakeSeat={() => handleSeatClick(2)}
               />
@@ -280,13 +309,13 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             <div className="flex justify-between items-center z-10 px-2 sm:px-6">
               <SeatCard
                 seat={currentRoom.seats[3]}
-                label="OESTE (Rival 2)"
+                label="OESTE (pareja de Este)"
                 isLocalPlayer={currentRoom.seats[3]?.playerId === localPlayerId}
                 onTakeSeat={() => handleSeatClick(3)}
               />
               <SeatCard
                 seat={currentRoom.seats[1]}
-                label="ESTE (Rival 1)"
+                label="ESTE (pareja de Oeste)"
                 isLocalPlayer={currentRoom.seats[1]?.playerId === localPlayerId}
                 onTakeSeat={() => handleSeatClick(1)}
               />
@@ -296,7 +325,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             <div className="flex justify-center z-10">
               <SeatCard
                 seat={currentRoom.seats[0]}
-                label="SUR (Tú / Mano inicial)"
+                label="SUR (mano inicial)"
                 isLocalPlayer={currentRoom.seats[0]?.playerId === localPlayerId}
                 onTakeSeat={() => handleSeatClick(0)}
               />
@@ -413,6 +442,11 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   // ----------------------------------------------------
   return (
     <div className="max-w-5xl mx-auto my-3 p-4 sm:p-6 bg-stone-900 border-2 border-amber-600 rounded-3xl shadow-2xl text-stone-100 font-sans">
+      {serverError && (
+        <div className="mb-3 p-2.5 rounded-xl bg-rose-950/80 border border-rose-600/70 text-rose-200 text-xs font-bold text-center">
+          ⚠️ {serverError}
+        </div>
+      )}
       {/* Lobby Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between border-b border-stone-800 pb-4 mb-4 gap-3">
         <div className="flex items-center gap-3">
