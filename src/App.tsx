@@ -10,6 +10,7 @@ import {
   TournamentMatch,
   Seña,
   GameLogEntry,
+  NetAction,
 } from './types';
 import { PC_MUS_CHARACTERS, CharacterInfo, CAMEOS, Cameo, getCharacterLine } from './characters';
 import {
@@ -42,6 +43,8 @@ import { MultiplayerChatModal } from './components/MultiplayerChatModal';
 import { UserControlModal } from './components/UserControlModal';
 import { userProfileEngine, UserProfile } from './userProfileEngine';
 import { multiplayerService } from './multiplayer/multiplayerService';
+import { TableSnapshot, toAbsolute, toLocal, absoluteSeat, localSeat as toLocalSeat } from './multiplayer/netSync';
+import { SEÑAS } from './musLogic';
 import { MultiplayerRoom } from './types';
 import { getMusRank } from './musLogic';
 import { RecuentoOverlay } from './components/RecuentoOverlay';
@@ -103,6 +106,30 @@ export default function App() {
   // Multiplayer state
   const [multiplayerRoom, setMultiplayerRoom] = useState<MultiplayerRoom | null>(null);
   const [localSeatIndex, setLocalSeatIndex] = useState<number>(0);
+  // Online roles: the host's browser runs the game; clients mirror it and send their moves
+  const [netRole, setNetRole] = useState<'none' | 'host' | 'client'>('none');
+  const netRoleRef = useRef<'none' | 'host' | 'client'>('none');
+  netRoleRef.current = netRole;
+  const mySeatRef = useRef<number>(0); // my absolute seat in the room
+  // Engine seats played by people (0 = you; online, also the other humans at the table)
+  const [humanSeats, setHumanSeats] = useState<number[]>([0]);
+  const humanSeatsRef = useRef<Set<number>>(new Set([0]));
+  humanSeatsRef.current = new Set(humanSeats);
+  // Seats that have chosen their discards (the deal waits for every human)
+  const [discardReady, setDiscardReady] = useState<number[]>([]);
+  const discardReadyRef = useRef<number[]>([]);
+  discardReadyRef.current = discardReady;
+  const [clientSelection, setClientSelection] = useState<number[]>([]);
+  const clientSelectionRef = useRef<number[]>([]);
+  clientSelectionRef.current = clientSelection;
+  const [netNotice, setNetNotice] = useState<string | null>(null);
+  const appliedVersionRef = useRef<number>(0);
+  const lastActionSeqRef = useRef<number>(0);
+  const handNumberRef = useRef<number>(0);
+  const [clientBusy, setClientBusy] = useState<boolean>(false);
+  // Guest: a move sent and not yet reflected by the host (avoids double moves)
+  const pendingMoveRef = useRef<{ phase: LancePhase; turn: number; at: number } | null>(null);
+  const discardSentRef = useRef<boolean>(false);
   const [chatModalOpen, setChatModalOpen] = useState<boolean>(false);
 
   // Tournament progression (3 rounds)
@@ -265,6 +292,10 @@ export default function App() {
     target: number
   ) => {
     setGameMode(mode);
+    setNetRole('none');
+    netRoleRef.current = 'none';
+    setHumanSeats([0]);
+    humanSeatsRef.current = new Set([0]);
     setTargetPiedras(target);
     setScoreTeam0({ piedras: 0, juegosWon: 0 });
     setScoreTeam1({ piedras: 0, juegosWon: 0 });
@@ -353,21 +384,28 @@ export default function App() {
     }
   };
 
-  // Start multiplayer game when ready from lobby
-  const handleStartMultiplayerGame = (room: MultiplayerRoom, localSeat: number) => {
+  // Start (or resume) an online game. The engine always puts you at local seat 0:
+  // local seat i is the room's absolute seat (i + mySeat) % 4.
+  const handleStartMultiplayerGame = (room: MultiplayerRoom, mySeat: number) => {
+    const me = multiplayerService.getPlayerId();
+    const isHost = room.hostPlayerId === me;
+    clearAllPendingTimers();
     setGameMode('multijugador');
     setMultiplayerRoom(room);
-    setLocalSeatIndex(localSeat);
+    setLocalSeatIndex(mySeat);
+    mySeatRef.current = mySeat;
     setTargetPiedras(room.targetPiedras);
-    setScoreTeam0({ piedras: 0, juegosWon: 0 });
-    setScoreTeam1({ piedras: 0, juegosWon: 0 });
+    setNetNotice(null);
+    appliedVersionRef.current = 0;
+    lastActionSeqRef.current = 0;
+    setClientSelection([]);
+    setDiscardReady([]);
 
-    const newPlayers: Player[] = room.seats.map((s, idx) => {
-      const char =
-        PC_MUS_CHARACTERS.find((c) => c.id === s.characterId) ||
-        PC_MUS_CHARACTERS[idx % PC_MUS_CHARACTERS.length];
+    const newPlayers: Player[] = [0, 1, 2, 3].map((idx) => {
+      const s = room.seats[absoluteSeat(idx, mySeat)];
+      const char = PC_MUS_CHARACTERS.find((c) => c.id === s.characterId) || PC_MUS_CHARACTERS[idx % PC_MUS_CHARACTERS.length];
       return {
-        id: s.playerId || char.id,
+        id: char.id, // portraits & voices come from the character
         name: s.playerName || char.name,
         realName: char.realName,
         quote: char.presentation,
@@ -382,11 +420,134 @@ export default function App() {
         bluffRate: char.bluffRate,
       };
     });
-
-    setPlayers(newPlayers);
-    setManoIndex(0);
+    const humans = [0, 1, 2, 3].filter((idx) => {
+      const s = room.seats[absoluteSeat(idx, mySeat)];
+      return idx === 0 || (s.occupied && !s.isBot);
+    });
+    setHumanSeats(humans);
+    humanSeatsRef.current = new Set(humans);
     setView('game');
-    dealNewHand(newPlayers, 0);
+
+    if (isHost) {
+      setNetRole('host');
+      netRoleRef.current = 'host';
+      if (room.state && (room.stateVersion || 0) > 0) {
+        // Host came back (page reload): continue the same game from the last snapshot
+        loadEngineFromSnapshot(toLocal(room.state as TableSnapshot, mySeat), newPlayers);
+        setRecentEvent('Partida online recuperada. ¡Seguimos!');
+      } else {
+        setScoreTeam0({ piedras: 0, juegosWon: 0 });
+        setScoreTeam1({ piedras: 0, juegosWon: 0 });
+        score0Ref.current = { piedras: 0, juegosWon: 0 };
+        score1Ref.current = { piedras: 0, juegosWon: 0 };
+        setPlayers(newPlayers);
+        setManoIndex(0);
+        dealNewHand(newPlayers, 0);
+      }
+    } else {
+      setNetRole('client');
+      netRoleRef.current = 'client';
+      handWonRef.current = false;
+      isScoringRef.current = false;
+      setTransitioning(false);
+      setPlayers(newPlayers);
+      setPhase('dealing');
+      setCurrentTurn(-1);
+      setRecountPlan(null);
+      setRecentEvent('Conectando con la mesa del anfitrión...');
+      if (room.state) applySnapshot(room);
+    }
+  };
+
+  // Load a snapshot (already in local seats) into this browser's engine
+  const loadEngineFromSnapshot = (snap: TableSnapshot, fallbackPlayers?: Player[]) => {
+    clearAllPendingTimers();
+    const table = snap.players.map((p, i) => ({
+      ...(fallbackPlayers?.[i] || p),
+      ...p,
+      id: fallbackPlayers?.[i]?.id || p.id,
+      name: fallbackPlayers?.[i]?.name || p.name,
+      currentSpeech: null,
+      lastGesture: null,
+    }));
+    // Rebuild the remaining deck: every card not in somebody's hand
+    const inHands = new Set(table.flatMap((p) => p.cards.map((c) => `${c.suit}-${c.number}`)));
+    const freshDeck = createDeck().filter((c) => !inHands.has(`${c.suit}-${c.number}`));
+    setDeck(freshDeck);
+    discardPileRef.current = [];
+    playersRef.current = table;
+    setPlayers(table);
+    setManoIndex(snap.manoIndex);
+    // A recount in progress restarts from the last lance decision (points are paid by the recount)
+    const resumePhase: LancePhase = snap.phase === 'scoring' ? 'round_end' : snap.phase;
+    setPhase(resumePhase);
+    setCurrentTurn(snap.currentTurn);
+    setShowAllCards(snap.showAllCards);
+    setLanceBets(snap.lanceBets);
+    lanceBetsRef.current = snap.lanceBets;
+    setScoreTeam0(snap.scores[0]);
+    setScoreTeam1(snap.scores[1]);
+    score0Ref.current = snap.scores[0];
+    score1Ref.current = snap.scores[1];
+    setRecountPlan(null);
+    updateGazes(snap.gazes);
+    updateIntel(snap.intel);
+    setDiscardReady(snap.discardReady || []);
+    setTargetPiedras(snap.targetPiedras);
+    handNumberRef.current = snap.handNumber || 0;
+    handWonRef.current = resumePhase === 'game_over';
+    isScoringRef.current = false;
+    setTransitioning(false);
+  };
+
+  // Client: show the host's table from my seat
+  const applySnapshot = (room: MultiplayerRoom) => {
+    if (!room.state || (room.stateVersion || 0) <= appliedVersionRef.current) return;
+    appliedVersionRef.current = room.stateVersion || 0;
+    const snap = toLocal(room.state as TableSnapshot, mySeatRef.current);
+    const prevPlayers = playersRef.current;
+    const myGaze = gazesRef.current[0];
+    // Voices: say out loud the lines that just appeared
+    snap.players.forEach((p, i) => {
+      if (p.currentSpeech && p.currentSpeech !== prevPlayers[i]?.currentSpeech) {
+        voiceEngine.speakCharacter(p.id, p.currentSpeech);
+      }
+    });
+    if (snap.phase !== 'discarding') {
+      setClientSelection([]);
+      discardSentRef.current = false;
+    } else if (discardSentRef.current && !snap.discardReady.includes(0)) {
+      snap.discardReady = [...snap.discardReady, 0];
+    }
+    const discarding = snap.phase === 'discarding' && !snap.discardReady.includes(0);
+    // A move I sent is done once the turn or phase moves on (or after a few seconds)
+    const pending = pendingMoveRef.current;
+    if (pending && (pending.phase !== snap.phase || pending.turn !== snap.currentTurn || Date.now() - pending.at > 5000)) {
+      pendingMoveRef.current = null;
+    }
+    setPlayers(
+      snap.players.map((p, i) => ({
+        ...p,
+        name: prevPlayers[i]?.name || p.name,
+        selectedToDiscard: i === 0 && discarding ? clientSelectionRef.current : [],
+      }))
+    );
+    setManoIndex(snap.manoIndex);
+    setCurrentTurn(snap.currentTurn);
+    setPhase(snap.phase);
+    setShowAllCards(snap.showAllCards);
+    setRecentEvent(snap.recentEvent);
+    setLanceBets(snap.lanceBets);
+    setScoreTeam0(snap.scores[0]);
+    setScoreTeam1(snap.scores[1]);
+    setRecountPlan(snap.recountPlan);
+    const gz = [...snap.gazes] as GazeTarget[];
+    gz[0] = myGaze; // my own eyes respond instantly
+    updateGazes(gz);
+    updateIntel(snap.intel);
+    setDiscardReady(snap.discardReady);
+    setClientBusy(snap.busy || !!pendingMoveRef.current);
+    setTargetPiedras(snap.targetPiedras);
   };
 
   // Tutorial action: quick start
@@ -402,14 +563,180 @@ export default function App() {
     handleStartGame(playerChar, partnerChar, [rival1, rival2], mode, 40);
   };
 
-  // Keep multiplayer room state updated
+  // Keep multiplayer room state updated (clients also receive the host's table here)
   useEffect(() => {
-    if (!multiplayerRoom?.id) return;
-    const unsubscribe = multiplayerService.subscribeToRoom(multiplayerRoom.id, (updated) => {
-      setMultiplayerRoom(updated);
-    });
+    if (!multiplayerRoom?.id || view !== 'game') return;
+    const unsubscribe = multiplayerService.subscribeToRoom(
+      multiplayerRoom.id,
+      (updated) => {
+        setMultiplayerRoom(updated);
+        const me = multiplayerService.getPlayerId();
+        if (!updated.seats.some((s) => s.playerId === me)) {
+          setNetNotice('Ya no estás sentado en esta mesa.');
+          return;
+        }
+        if (updated.status === 'finished') {
+          setNetNotice('La partida online ha terminado: el anfitrión ha abandonado la mesa.');
+        } else if (netRoleRef.current === 'client' && !updated.hostOnline) {
+          setNetNotice('El anfitrión no responde... esperando a que vuelva.');
+        } else {
+          setNetNotice(null);
+        }
+        if (netRoleRef.current === 'client') applySnapshotRef.current(updated);
+      },
+      (err) => setNetNotice(err.message),
+      netRoleRef.current === 'client' ? 600 : 2000
+    );
     return () => unsubscribe();
-  }, [multiplayerRoom?.id]);
+  }, [multiplayerRoom?.id, view, netRole]);
+
+  // ───────── Save & resume (AI Studio reloads the preview page often) ─────────
+  const SAVE_KEY = 'pc_mus_saved_game_v1';
+  const clearSavedGame = () => {
+    try {
+      localStorage.removeItem(SAVE_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  };
+  // Save the game against the computer whenever the table is in a stable state
+  useEffect(() => {
+    if (netRole !== 'none' || players.length !== 4) return;
+    if (view !== 'game' && view !== 'bracket') return;
+    if (view === 'game' && (phase === 'game_over' || handWonRef.current)) {
+      if (gameMode !== 'torneo' || phase === 'game_over') clearSavedGame();
+      return;
+    }
+    if (view === 'game' && (isTransitioning || phase === 'scoring' || phase === 'dealing')) return;
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          SAVE_KEY,
+          JSON.stringify({
+            v: 1,
+            at: Date.now(),
+            view,
+            gameMode,
+            gameSpeed,
+            targetPiedras,
+            tournamentRound,
+            tournamentMatches,
+            snapshot: buildSnapshot(),
+          })
+        );
+      } catch {
+        /* storage full or blocked: nothing to do */
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [netRole, view, players, phase, currentTurn, manoIndex, lanceBets, scoreTeam0, scoreTeam1, isTransitioning, tournamentRound]);
+
+  // After a page reload, go back to where you were: the online table or the saved game
+  useEffect(() => {
+    const roomId = multiplayerService.getActiveRoomId();
+    if (!roomId) {
+      try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        const saved = raw ? JSON.parse(raw) : null;
+        if (!saved || saved.v !== 1 || Date.now() - saved.at > 24 * 60 * 60 * 1000 || !saved.snapshot?.players?.length) {
+          return;
+        }
+        setGameMode(saved.gameMode);
+        setGameSpeed(saved.gameSpeed || 'tranquilo');
+        setTournamentRound(saved.tournamentRound || 0);
+        if (Array.isArray(saved.tournamentMatches)) setTournamentMatches(saved.tournamentMatches);
+        if (saved.view === 'bracket') {
+          setPlayers(saved.snapshot.players);
+          setTargetPiedras(saved.targetPiedras || 40);
+          setScoreTeam0(saved.snapshot.scores[0]);
+          setScoreTeam1(saved.snapshot.scores[1]);
+          setView('bracket');
+        } else {
+          loadEngineFromSnapshot(saved.snapshot);
+          setRecentEvent('🔄 Partida recuperada tras recargar la página. ¡Seguimos donde lo dejaste!');
+          setView('game');
+        }
+      } catch {
+        clearSavedGame();
+      }
+      return;
+    }
+    multiplayerService
+      .getRoom(roomId)
+      .then((room) => {
+        const mine = room.seats.find((s) => s.playerId === multiplayerService.getPlayerId());
+        if (room.status === 'playing' && mine) handleStartMultiplayerGame(room, mine.seatIndex);
+        else multiplayerService.setActiveRoomId(null);
+      })
+      .catch(() => multiplayerService.setActiveRoomId(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const applySnapshotRef = useRef(applySnapshot);
+  applySnapshotRef.current = applySnapshot;
+
+  // Host: publish the table every time it changes
+  const buildSnapshot = (): TableSnapshot => ({
+    players: playersRef.current.map((p) => ({ ...p })),
+    manoIndex,
+    currentTurn,
+    phase,
+    showAllCards,
+    recentEvent,
+    lanceBets,
+    scores: [scoreTeam0, scoreTeam1],
+    recountPlan,
+    gazes,
+    intel,
+    discardReady,
+    busy: isTransitioning,
+    targetPiedras,
+    handNumber: handNumberRef.current,
+  });
+  useEffect(() => {
+    if (netRole !== 'host' || !multiplayerRoom?.id || view !== 'game' || players.length !== 4) return;
+    const roomId = multiplayerRoom.id;
+    const timer = window.setTimeout(() => {
+      multiplayerService
+        .publishState(roomId, toAbsolute(buildSnapshot(), mySeatRef.current))
+        .catch((err) => setNetNotice((err as Error).message));
+    }, 120);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [netRole, view, multiplayerRoom?.id, players, phase, currentTurn, manoIndex, lanceBets, scoreTeam0, scoreTeam1, showAllCards, recentEvent, recountPlan, gazes, intel, discardReady, isTransitioning]);
+
+  // Host: receive the moves of the other people at the table
+  useEffect(() => {
+    if (netRole !== 'host' || !multiplayerRoom?.id || view !== 'game') return;
+    const roomId = multiplayerRoom.id;
+    let stopped = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      try {
+        const { actions } = await multiplayerService.pullActions(roomId, lastActionSeqRef.current);
+        for (const a of actions) {
+          if (stopped) return;
+          lastActionSeqRef.current = Math.max(lastActionSeqRef.current, a.seq);
+          try {
+            applyRemoteActionRef.current(a);
+          } catch (err) {
+            console.error('Acción remota no válida', err);
+          }
+          // One game move per cycle, so the next one is checked against the updated table
+          if (a.kind !== 'gaze') break;
+        }
+      } catch {
+        /* network hiccup: try again */
+      }
+      if (!stopped) timer = window.setTimeout(tick, 350);
+    };
+    tick();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [netRole, view, multiplayerRoom?.id]);
 
   // Deals a fresh 4-card hand to each player
   const dealNewHand = (currentPlayers: Player[], mano: number) => {
@@ -434,6 +761,8 @@ export default function App() {
 
     setDeck(newDeck);
     discardPileRef.current = [];
+    handNumberRef.current += 1;
+    setDiscardReady([]);
     setPlayers(dealtPlayers);
     resetSeñasForNewCards();
     setShowAllCards(false);
@@ -460,17 +789,19 @@ export default function App() {
   const isPrecheckPhase = phase === 'pares_precheck' || phase === 'juego_precheck';
   // The app certifies the human's pares/juego (nobody can lie), and skips seat 0 in a
   // pares/juego lance when it has nothing to bet with.
-  const seat0NeedsAutomation =
-    currentTurn === 0 &&
+  const currentIsHuman = humanSeats.includes(currentTurn);
+  const humanNeedsAutomation =
+    currentIsHuman &&
     (isPrecheckPhase ||
-      (phase === 'pares_bet' && !players[0]?.declaredPares) ||
-      (phase === 'juego_bet' && !players[0]?.declaredJuego));
+      (phase === 'pares_bet' && !players[currentTurn]?.declaredPares) ||
+      (phase === 'juego_bet' && !players[currentTurn]?.declaredJuego));
 
   // AI Turn automation ticker.
   // Instead of a single timeout (which was lost if it fired during a transition and the game
   // froze), it polls until the turn can be played, and always calls the latest handler.
   useEffect(() => {
     if (view !== 'game' || players.length === 0) return;
+    if (netRole === 'client') return; // the host's browser runs the game
     const isTurnPhase = [
       'mus_dialog',
       'grande',
@@ -482,11 +813,11 @@ export default function App() {
       'punto_bet',
     ].includes(phase);
     if (!isTurnPhase || currentTurn < 0) return;
-    // Your own turn is automated only to certify your declaration or to skip a lance you can't bet in
-    if (currentTurn === 0 && !seat0NeedsAutomation) return;
+    // A person's turn is automated only to certify their declaration or to skip a lance they can't bet in
+    if (currentIsHuman && !humanNeedsAutomation) return;
 
     const startedAt = Date.now();
-    const delay = currentTurn === 0 && !isPrecheckPhase ? 300 : getDelays().aiTurn;
+    const delay = currentIsHuman && !isPrecheckPhase ? 300 : getDelays().aiTurn;
     let acted = false;
     const interval = window.setInterval(() => {
       if (acted) return;
@@ -503,7 +834,7 @@ export default function App() {
       }
     }, 150);
     return () => clearInterval(interval);
-  }, [currentTurn, phase, view, gameSpeed, players.length, seat0NeedsAutomation]);
+  }, [currentTurn, phase, view, gameSpeed, players.length, currentIsHuman, humanNeedsAutomation, netRole]);
 
   // Keep refs in sync so the gaze ticker always reads the latest table state
   gazesRef.current = gazes;
@@ -607,6 +938,7 @@ export default function App() {
   useEffect(() => {
     if (view !== 'game') return;
     const interval = window.setInterval(() => {
+      if (netRoleRef.current === 'client') return;
       const table = playersRef.current;
       if (table.length !== 4) return;
       const now = Date.now();
@@ -615,6 +947,7 @@ export default function App() {
       let changed = false;
       const next = [...gazesRef.current] as GazeTarget[];
       for (let seat = 1; seat < 4; seat++) {
+        if (humanSeatsRef.current.has(seat)) continue;
         if (now >= nextGazeChangeRef.current[seat]) {
           next[seat] = pickNextGaze(seat, next[seat]);
           nextGazeChangeRef.current[seat] = now + randomGazeDuration();
@@ -626,6 +959,7 @@ export default function App() {
       // 2. AI señas
       if (!SEÑA_PHASES.includes(phaseRef.current) || showAllCardsRef.current) return;
       for (let seat = 1; seat < 4; seat++) {
+        if (humanSeatsRef.current.has(seat)) continue;
         const p = table[seat];
         const pending = getValidSeñas(p.cards).filter((s) => !señasSentRef.current.has(`${seat}:${s.id}`));
         if (!pending.length) continue;
@@ -672,7 +1006,7 @@ export default function App() {
       return;
     }
 
-    if (currentTurn === 0) return; // the human plays their own turn
+    if (humanSeatsRef.current.has(currentTurn)) return; // people play their own turns
 
     // Mus question phase
     if (phase === 'mus_dialog') {
@@ -775,18 +1109,36 @@ export default function App() {
     }
   };
 
-  // Discarding cards
-  const handleUserDiscard = () => {
+  // A person has chosen their discards; the new cards are dealt when every human is ready
+  const handleSeatDiscard = (seat: number, indices: number[]) => {
+    if (phaseRef.current !== 'discarding' || isTransitioningRef.current) return;
+    const valid = [...new Set(indices)].filter((i) => i >= 0 && i < 4);
+    if (valid.length === 0 || discardReadyRef.current.includes(seat)) return;
+    const table = playersRef.current.map((p, i) => (i === seat ? { ...p, selectedToDiscard: valid } : p));
+    playersRef.current = table;
+    setPlayers(table);
+    const ready = [...discardReadyRef.current, seat];
+    discardReadyRef.current = ready;
+    setDiscardReady(ready);
+    const waiting = [...humanSeatsRef.current].filter((h) => !ready.includes(h));
+    if (waiting.length > 0) {
+      setRecentEvent(`Esperando los descartes de ${waiting.map((h) => table[h]?.name).join(' y ')}...`);
+      return;
+    }
+    handleUserDiscard(table);
+  };
+
+  // Discarding cards (everybody at once)
+  const handleUserDiscard = (table: Player[] = playersRef.current) => {
     sound.playCard();
-    const user = players[0];
-    const userDiscardIndices = user.selectedToDiscard || [];
+    const players = table;
 
     // Everybody draws from the same remaining deck (before, each player drew from its own copy
     // and cards were duplicated). When it runs out, the previous discards are reshuffled.
     let remainingDeck = [...deck];
     let discardPile = [...discardPileRef.current];
     const updatedPlayers = players.map((p, idx) => {
-      const discards = idx === 0 ? userDiscardIndices : getAIDiscardIndices(p.cards);
+      const discards = humanSeatsRef.current.has(idx) ? p.selectedToDiscard || [] : getAIDiscardIndices(p.cards);
       const newCards = [...p.cards];
 
       discards.forEach((dIdx) => {
@@ -817,6 +1169,8 @@ export default function App() {
 
     setDeck(remainingDeck);
     discardPileRef.current = discardPile;
+    setDiscardReady([]);
+    discardReadyRef.current = [];
     setPlayers(updatedPlayers);
     resetSeñasForNewCards();
     setRecentEvent('Se han repartido los nuevos naipes de descarte. Nueva consulta de Mus.');
@@ -1325,25 +1679,30 @@ export default function App() {
     setCameo(randomCameo);
   };
 
-  // Handle Seña sent by user: your partner must be looking at you, and any rival looking will catch it
-  const handleSendSeña = (seña: Seña, _isTruthful: boolean = true) => {
+  // A person passes a seña: their partner must be looking at them, and any rival looking catches it
+  const handleSendSeña = (seña: Seña, _isTruthful: boolean = true, seat: number = 0) => {
     if (!SEÑA_PHASES.includes(phaseRef.current) || showAllCardsRef.current) {
-      setRecentEvent('Ahora no es momento de pasar señas.');
+      if (seat === 0) setRecentEvent('Ahora no es momento de pasar señas.');
       return;
     }
-    sound.playSeña();
     const table = playersRef.current;
+    const sender = table[seat];
+    if (!sender || !seña.ruleCheck(sender.cards)) return; // «la boca hace ley»: only truthful señas
+    sound.playSeña();
     const currentGazes = gazesRef.current;
-    const partner = table[2];
-    const partnerLooking = currentGazes[2] === 0;
-    const watchers = [1, 3].filter((s) => currentGazes[s] === 0);
+    const partnerSeat = partnerOf(seat);
+    const partner = table[partnerSeat];
+    const partnerLooking = currentGazes[partnerSeat] === seat;
+    const watchers = opponentsOf(seat).filter((o) => currentGazes[o] === seat);
     const label = señaShortLabel(seña.id);
+    const team = sender.team;
 
     let nextIntel = intelRef.current;
-    if (partnerLooking) nextIntel = addIntel(nextIntel, 0, 0, seña.id);
-    if (watchers.length) nextIntel = addIntel(nextIntel, 1, 0, seña.id);
+    if (partnerLooking) nextIntel = addIntel(nextIntel, team, seat, seña.id);
+    if (watchers.length) nextIntel = addIntel(nextIntel, team === 0 ? 1 : 0, seat, seña.id);
     updateIntel(nextIntel);
 
+    const you = seat === 0;
     if (watchers.length) {
       const catcher = watchers[0];
       const quote = getSeenSeñaQuote(catcher);
@@ -1353,50 +1712,124 @@ export default function App() {
       }, 500);
       const names = watchers.map((w) => table[w].name).join(' y ');
       setRecentEvent(
-        partnerLooking
-          ? `👁️ ¡${names} te ha pillado la seña «${label}»! Tu compañero también la ha visto.`
-          : `👁️ ¡${names} te ha pillado la seña «${label}» y tu compañero ni te miraba!`
+        you
+          ? partnerLooking
+            ? `👁️ ¡${names} te ha pillado la seña «${label}»! Tu compañero también la ha visto.`
+            : `👁️ ¡${names} te ha pillado la seña «${label}» y tu compañero ni te miraba!`
+          : `👁️ ¡${names} ha pillado una seña de ${sender.name}!`
       );
     } else if (partnerLooking) {
-      window.setTimeout(() => sayBriefly(2, '*(Entendido, compañero...)*'), 600);
-      setRecentEvent(`🤫 Seña limpia: ${partner?.name} sabe que llevas «${label}». Nadie más lo ha visto.`);
-    } else {
+      window.setTimeout(() => sayBriefly(partnerSeat, '*(Entendido, compañero...)*'), 600);
+      if (you) setRecentEvent(`🤫 Seña limpia: ${partner?.name} sabe que llevas «${label}». Nadie más lo ha visto.`);
+    } else if (you) {
       setRecentEvent(`🙈 ${partner?.name} no te estaba mirando: la seña «${label}» se ha perdido.`);
     }
   };
 
+  // Host: apply a move sent by another person at the table
+  const applyRemoteAction = (a: NetAction) => {
+    const seat = toLocalSeat(a.seat, mySeatRef.current);
+    if (seat === 0 || !humanSeatsRef.current.has(seat)) return;
+    if (a.kind === 'action' && a.action) {
+      handleUserAction(a.action, seat);
+    } else if (a.kind === 'discard' && a.indices) {
+      handleSeatDiscard(seat, a.indices);
+    } else if (a.kind === 'seña' && a.señaId) {
+      const seña = SEÑAS.find((x) => x.id === a.señaId);
+      if (seña) handleSendSeña(seña, true, seat);
+    } else if (a.kind === 'gaze' && typeof a.target === 'number') {
+      const target = a.target < 0 ? -1 : toLocalSeat(a.target, mySeatRef.current);
+      if (target === seat) return;
+      const next = [...gazesRef.current] as GazeTarget[];
+      next[seat] = target as GazeTarget;
+      updateGazes(next);
+    }
+  };
+  const applyRemoteActionRef = useRef(applyRemoteAction);
+  applyRemoteActionRef.current = applyRemoteAction;
+
+  // Client: my moves go to the host
+  const sendClientMove = (move: Omit<NetAction, 'seq' | 'seat'>) => {
+    if (!multiplayerRoom?.id) return;
+    multiplayerService.sendAction(multiplayerRoom.id, move).catch((err) => setNetNotice((err as Error).message));
+  };
+
+  // Your seña: played here, or sent to the host when you are a guest at an online table
+  const sendSeñaFromYou = (seña: Seña) => {
+    if (netRole === 'client') {
+      if (!seña.ruleCheck(players[0]?.cards || [])) return;
+      sound.playSeña();
+      sendClientMove({ kind: 'seña', señaId: seña.id });
+      return;
+    }
+    handleSendSeña(seña, true, 0);
+  };
+
+  const leaveOnlineTable = () => {
+    if (multiplayerRoom?.id) multiplayerService.leaveRoom(multiplayerRoom.id);
+    multiplayerService.setActiveRoomId(null);
+    clearAllPendingTimers();
+    handWonRef.current = true; // stop the engine
+    setMultiplayerRoom(null);
+    setNetRole('none');
+    netRoleRef.current = 'none';
+    setHumanSeats([0]);
+    setNetNotice(null);
+    setRecountPlan(null);
+  };
+
   // User controls action dispatcher
-  const handleUserAction = (action: string) => {
+  const handleUserAction = (action: string, seat: number = 0) => {
+    if (netRoleRef.current === 'client') {
+      // Online client: the host plays the move
+      if (action === 'discard') {
+        if (phase !== 'discarding' || discardReady.includes(0) || clientSelection.length === 0) return;
+        if (discardSentRef.current) return;
+        discardSentRef.current = true;
+        sendClientMove({ kind: 'discard', indices: clientSelection });
+        setDiscardReady((prev) => [...prev, 0]);
+      } else if (currentTurn === 0 && !clientBusy) {
+        sendClientMove({ kind: 'action', action });
+        pendingMoveRef.current = { phase, turn: currentTurn, at: Date.now() };
+        setClientBusy(true); // until the host plays it
+      }
+      return;
+    }
     if (isTransitioningRef.current || isScoringRef.current || handWonRef.current) return;
-    if (action === 'discard' ? phase !== 'discarding' : currentTurn !== 0) return;
-    const user = players[0];
+    if (action === 'discard') {
+      if (phase !== 'discarding') return;
+      handleSeatDiscard(seat, playersRef.current[seat]?.selectedToDiscard || []);
+      return;
+    }
+    if (currentTurn !== seat) return;
+    const isLocal = seat === 0;
+    const players = playersRef.current;
+    const user = players[seat];
     if (action === 'mus') {
-      userProfileEngine.recordAction('mus');
+      if (isLocal) userProfileEngine.recordAction('mus');
       sound.playCard();
       const speech = getCharacterLine(user?.id || 'tio_gil', 'mus') || '¡Mus!';
       setPlayers((prev) =>
-        prev.map((p, i) => (i === 0 ? { ...p, currentSpeech: speech, saidMus: true } : p))
+        prev.map((p, i) => (i === seat ? { ...p, currentSpeech: speech, saidMus: true } : p))
       );
       if (user) voiceEngine.speakCharacter(user.id, speech);
-      setRecentEvent('Has pedido Mus.');
-      advanceMusTurn(0);
+      setRecentEvent(isLocal ? 'Has pedido Mus.' : `${user?.name} dice: «Mus».`);
+      advanceMusTurn(seat);
     } else if (action === 'no_mus') {
-      userProfileEngine.recordAction('no_mus');
+      if (isLocal) userProfileEngine.recordAction('no_mus');
       sound.playEnvido();
       const speech = getCharacterLine(user?.id || 'tio_gil', 'noMus') || '¡No hay mus!';
       setPlayers((prev) =>
-        prev.map((p, i) => (i === 0 ? { ...p, currentSpeech: speech, saidMus: false } : p))
+        prev.map((p, i) => (i === seat ? { ...p, currentSpeech: speech, saidMus: false } : p))
       );
       if (user) voiceEngine.speakCharacter(user.id, speech);
-      setRecentEvent('¡Cortas el mus! No hay mus.');
+      setRecentEvent(isLocal ? '¡Cortas el mus! No hay mus.' : `¡${user?.name} corta el mus! No hay mus.`);
       setTransitioning(true);
       const delays = getDelays();
       safeTimeout(() => {
         setTransitioning(false);
         startLance('grande');
       }, delays.transition);
-    } else if (action === 'discard') {
-      handleUserDiscard();
     } else if (action === 'declare_pares_si' || action === 'declare_pares_no') {
       if (phase !== 'pares_precheck') return;
       handleUserPrecheckDeclaration(); // the app certifies the real cards
@@ -1436,12 +1869,21 @@ export default function App() {
           handStrength = sum === 30 ? 9 : sum >= 27 ? 6 : 3;
         }
       }
-      userProfileEngine.recordAction(
-        (action.split(':')[0] as any),
-        lanceKey,
-        handStrength,
-        currentBetState.isOrdago
-      );
+      // Only moves that make sense right now (a remote browser could send anything)
+      const bet = lanceBetsRef.current[lanceKey] || currentBetState;
+      const base = action.split(':')[0];
+      const isBettingPhase = ['grande', 'chica', 'pares_bet', 'juego_bet', 'punto_bet'].includes(phase);
+      const allowed =
+        isBettingPhase &&
+        isPlayerEligibleForLance(user, lanceKey) &&
+        (bet.currentBet === 0
+          ? ['paso', 'envido', 'ordago'].includes(base)
+          : ['quiero', 'no_quiero', 'ordago'].includes(base) || (base === 'mas' && !bet.isOrdago));
+      if (!allowed) return;
+
+      if (isLocal) {
+        userProfileEngine.recordAction(base as any, lanceKey, handStrength, currentBetState.isOrdago);
+      }
 
       let speech = 'Paso.';
       if (action === 'envido') speech = getCharacterLine(user?.id || 'tio_gil', 'envido') || '¡Envido dos piedras!';
@@ -1453,18 +1895,26 @@ export default function App() {
       if (action === 'no_quiero') speech = getCharacterLine(user?.id || 'tio_gil', 'noQuiero') || 'No quiero.';
 
       setPlayers((prev) =>
-        prev.map((p, i) => (i === 0 ? { ...p, currentSpeech: speech } : p))
+        prev.map((p, i) => (i === seat ? { ...p, currentSpeech: speech } : p))
       );
       if (user) voiceEngine.speakCharacter(user.id, speech);
 
-      executeBetAction(0, action as any, lanceKey);
+      executeBetAction(seat, action as any, lanceKey);
     }
   };
 
   // Card click during discard
   const handleCardClick = (cardIndex: number) => {
-    if (phase !== 'discarding') return;
+    if (phase !== 'discarding' || discardReady.includes(0)) return;
     sound.playCard();
+    if (netRole === 'client') {
+      const next = clientSelection.includes(cardIndex)
+        ? clientSelection.filter((x) => x !== cardIndex)
+        : [...clientSelection, cardIndex];
+      setClientSelection(next);
+      setPlayers((prev) => prev.map((p, i) => (i === 0 ? { ...p, selectedToDiscard: next } : p)));
+      return;
+    }
     setPlayers((prev) =>
       prev.map((p, i) => {
         if (i !== 0) return p;
@@ -1485,6 +1935,8 @@ export default function App() {
         onToggleCrt={() => setCrtEnabled(!crtEnabled)}
         onOpenRules={() => setRulesOpen(true)}
         onExitGame={() => {
+          clearSavedGame();
+          if (gameMode === 'multijugador') leaveOnlineTable();
           clearAllPendingTimers();
           handWonRef.current = true; // stops AI turns and pending transitions
           setRecountPlan(null);
@@ -1591,9 +2043,14 @@ export default function App() {
                   CÓDIGO: {multiplayerRoom.code}
                 </span>
                 <span className="text-[10px] text-stone-400">
-                  ({['Sur (Tú)', 'Este', 'Norte (Pareja)', 'Oeste'][localSeatIndex]})
+                  (Asiento {['Sur', 'Este', 'Norte', 'Oeste'][localSeatIndex]} · {netRole === 'host' ? 'anfitrión' : 'invitado'})
                 </span>
               </div>
+              {netNotice && (
+                <span className="text-[11px] font-bold text-rose-300 bg-rose-950/70 border border-rose-700/60 rounded-lg px-2 py-0.5">
+                  ⚠️ {netNotice}
+                </span>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setChatModalOpen(true)}
@@ -1604,8 +2061,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    multiplayerService.leaveRoom(multiplayerRoom.id);
-                    setMultiplayerRoom(null);
+                    leaveOnlineTable();
                     setView('multiplayer');
                   }}
                   className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-red-900/60 text-stone-300 hover:text-red-200 text-[11px] font-bold border border-stone-700 transition"
@@ -1655,10 +2111,13 @@ export default function App() {
               const next = [...gazesRef.current] as GazeTarget[];
               next[0] = t;
               updateGazes(next);
+              if (netRole === 'client') {
+                sendClientMove({ kind: 'gaze', target: t < 0 ? -1 : absoluteSeat(t, mySeatRef.current) });
+              }
             }}
             validSeñas={getValidSeñas(players[0]?.cards || [])}
             señasEnabled={SEÑA_PHASES.includes(phase) && !showAllCards}
-            onQuickSeña={(seña) => handleSendSeña(seña, true)}
+            onQuickSeña={sendSeñaFromYou}
           />
 
           {/* Recuento Tradicional de Tantos (Paso a paso, animado y pausado) */}
@@ -1670,15 +2129,19 @@ export default function App() {
               scoreTeam1={scoreTeam1}
               targetPiedras={targetPiedras}
               gameSpeed={gameSpeed}
-              onLancePointsAwarded={handleLancePointsAwarded}
-              onFinishRecount={handleFinishRecount}
+              onLancePointsAwarded={netRole === 'client' ? undefined : handleLancePointsAwarded}
+              onFinishRecount={netRole === 'client' ? () => {} : handleFinishRecount}
             />
           )}
 
           {/* Player controls & status bar */}
           {phase !== 'round_end' && phase !== 'game_over' ? (
             <Controls
-              isPlayerTurn={currentTurn === 0 && !isTransitioning}
+              isPlayerTurn={
+                phase === 'discarding'
+                  ? !discardReady.includes(0)
+                  : currentTurn === 0 && !(netRole === 'client' ? clientBusy : isTransitioning)
+              }
               phase={phase}
               currentLanceName={activeLanceName}
               betState={currentBetState}
@@ -1686,7 +2149,12 @@ export default function App() {
               onAction={handleUserAction}
               onOpenSeñas={() => setSeñasOpen(true)}
               waitingMessage={
-                players[currentTurn]
+                phase === 'discarding' && discardReady.includes(0)
+                  ? `Esperando los descartes de ${humanSeats
+                      .filter((h) => !discardReady.includes(h))
+                      .map((h) => players[h]?.name)
+                      .join(' y ') || 'la mesa'}...`
+                  : players[currentTurn]
                   ? phase === 'pares_bet' && !players[0]?.declaredPares
                     ? `Turno de ${players[currentTurn].name}. (Sin pares: tu compañero defiende a tu pareja)`
                     : phase === 'juego_bet' && !players[0]?.declaredJuego
@@ -1707,7 +2175,11 @@ export default function App() {
                 {phase === 'game_over' ? '¡PARTIDA CONCLUIDA!' : '¡MANO COMPLETADA!'}
               </h3>
               <p className="text-xs text-stone-300 mb-3">{recentEvent}</p>
-              {phase === 'round_end' ? (
+              {phase === 'round_end' && netRole === 'client' ? (
+                <p className="text-xs font-bold text-emerald-300 animate-pulse">
+                  Esperando a que el anfitrión reparta la siguiente mano...
+                </p>
+              ) : phase === 'round_end' ? (
                 <button
                   onClick={handleNextHand}
                   className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-lg transition active:scale-95"
@@ -1716,7 +2188,11 @@ export default function App() {
                 </button>
               ) : (
                 <button
-                  onClick={() => setView('select')}
+                  onClick={() => {
+                    clearSavedGame();
+                    if (gameMode === 'multijugador') leaveOnlineTable();
+                    setView('select');
+                  }}
                   className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-sm shadow-lg transition active:scale-95"
                 >
                   Volver al Menú Principal
@@ -1731,7 +2207,7 @@ export default function App() {
       <SeñasModal
         isOpen={señasOpen}
         onClose={() => setSeñasOpen(false)}
-        onSendSeña={handleSendSeña}
+        onSendSeña={sendSeñaFromYou}
         playerCards={players[0]?.cards || []}
       />
 
