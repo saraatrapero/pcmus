@@ -61,7 +61,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
       <header className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-brass-500/30 bg-gradient-to-b from-[#1f1108] to-[#130a04] rounded-b-2xl mb-2 select-none shadow-[0_8px_20px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-2 shrink-0">
           <span className="font-display whitespace-nowrap font-black text-brass-400 text-lg tracking-wider drop-shadow-[0_2px_0_rgba(0,0,0,0.6)]">
-            PC MUS <span className="text-xs text-stone-400 font-mono">1996</span>
+            PC MUS
           </span>
           <span className="bg-amber-950 text-amber-300 text-[10px] px-2 py-0.5 rounded border border-amber-600/40 uppercase font-mono hidden sm:inline">
             {gameMode === 'torneo'
@@ -152,7 +152,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
                 ? 'bg-amber-500 text-stone-950 border-amber-400'
                 : 'bg-stone-900 hover:bg-stone-800 border-stone-700 text-stone-300'
             }`}
-            title="Efecto monitor tubo CRT MS-DOS 1996"
+            title="Efecto monitor de tubo CRT"
           >
             <span>📺</span>
             <span className="hidden sm:inline">Modo CRT</span>

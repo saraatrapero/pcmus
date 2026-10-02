@@ -34,13 +34,13 @@ export const TournamentBracket: React.FC<TournamentBracketProps> = ({
       {/* Title */}
       <div className="text-center mb-6">
         <span className="text-xs uppercase tracking-widest font-black text-amber-400 font-serif">
-          GRAN TORNEO NACIONAL DE MUS 1996
+          GRAN TORNEO NACIONAL DE MUS
         </span>
         <h2 className="text-2xl sm:text-3xl font-black font-serif text-amber-200 mt-1">
           {isChampion ? '🏆 ¡¡CAMPEONES DEL TORNEO!! 🏆' : 'Cuadro de Eliminatorias (3 Rondas)'}
         </h2>
         <p className="text-xs text-stone-400 mt-1">
-          Avanza derrotando a las parejas de la farándula española para ganar el trofeo Círculo ASM.
+          Avanza derrotando a las parejas de la farándula española para ganar el trofeo del torneo.
         </p>
       </div>
 

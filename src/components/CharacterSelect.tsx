@@ -52,16 +52,13 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
 
   return (
     <div className="max-w-5xl mx-auto my-4 p-4 sm:p-6 bg-stone-900 border-2 border-amber-600 rounded-3xl shadow-2xl text-stone-100 font-sans">
-      {/* MS-DOS 1996 Header */}
+      {/* Header */}
       <div className="text-center border-b border-stone-800 pb-5 mb-5">
-        <div className="inline-block px-3 py-1 bg-amber-950 border border-amber-600 text-amber-300 font-mono text-xs font-bold rounded mb-2 tracking-widest">
-          CÍRCULO ASM & LIT • MS-DOS 1996
-        </div>
         <h1 className="text-4xl sm:text-6xl font-black font-display tracking-[0.12em] bg-gradient-to-b from-brass-300 via-brass-400 to-brass-600 bg-clip-text text-transparent drop-shadow-[0_3px_0_rgba(0,0,0,0.55)]">
           PC MUS
         </h1>
         <p className="text-sm sm:text-base text-stone-300/90 mt-1 max-w-xl mx-auto font-serif italic">
-          El legendario simulador de mus español con los personajes de la farándula de los 90.
+          El mus español de siempre, con personajes de la farándula, señas y torneo.
         </p>
 
         {/* User Profile & AI Intelligence Bar */}

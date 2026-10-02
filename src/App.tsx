@@ -2231,7 +2231,7 @@ export default function App() {
 
       {/* Bottom status line */}
       <footer className="w-full py-1 text-center text-[10px] text-stone-400 border-t border-stone-800/60 bg-stone-950/80">
-        PC Mus 1996 • Homenaje al clásico de Círculo ASM y Dinamic Multimedia • Baraja Española de 40 cartas (8 Reyes)
+        PC Mus • Baraja Española de 40 cartas (8 Reyes)
       </footer>
     </div>
   );
