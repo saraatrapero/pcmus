@@ -6,7 +6,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   RoomError,
-  authenticate,
   changeSeat,
   cleanup,
   createRoom,
@@ -22,6 +21,22 @@ import {
   sendChat,
   startRoomGame,
 } from './server/rooms';
+import {
+  createUser,
+  deleteUser,
+  getProfile,
+  initAuth,
+  listUsers,
+  login,
+  logout,
+  me,
+  requireAdmin,
+  requireUser,
+  savePreferences,
+  saveProfile,
+  tokenFrom,
+  updateUser,
+} from './server/auth';
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -30,10 +45,13 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 async function main() {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', true); // real client IP behind Cloud Run / AI Studio (login rate limit)
   app.use('/api', express.json({ limit: '600kb' }));
 
-  // Every API call identifies the player with an id + secret token kept in their browser
-  const player = (req: Request) => authenticate(req.header('x-player-id'), req.header('x-player-token'));
+  // Every game call needs a logged-in user (access control); rooms use the account id
+  const player = (req: Request) => requireUser(req.header('authorization')).id;
+  const user = (req: Request) => requireUser(req.header('authorization'));
+  const admin = (req: Request) => requireAdmin(req.header('authorization'));
   const route =
     (fn: (req: Request) => unknown) =>
     (req: Request, res: Response, next: NextFunction) => {
@@ -46,7 +64,20 @@ async function main() {
     };
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
-  app.get('/api/rooms', route(() => listPublicRooms()));
+
+  // Accounts
+  app.post('/api/auth/login', route((req) => login(req.body, req.ip || '')));
+  app.post('/api/auth/logout', route((req) => logout(tokenFrom(req.header('authorization')))));
+  app.get('/api/auth/me', route((req) => me(user(req))));
+  app.get('/api/me/profile', route((req) => getProfile(user(req))));
+  app.put('/api/me/profile', route((req) => saveProfile(user(req), req.body)));
+  app.put('/api/me/preferences', route((req) => savePreferences(user(req), req.body)));
+  app.get('/api/users', route((req) => (admin(req), listUsers())));
+  app.post('/api/users', route((req) => (admin(req), createUser(req.body))));
+  app.put('/api/users/:id', route((req) => updateUser(admin(req), req.params.id, req.body)));
+  app.delete('/api/users/:id', route((req) => deleteUser(admin(req), req.params.id)));
+
+  app.get('/api/rooms', route((req) => (player(req), listPublicRooms())));
   app.post('/api/rooms', route((req) => createRoom(player(req), req.body)));
   app.post('/api/rooms/join', route((req) => joinRoom(player(req), req.body)));
   app.get('/api/rooms/:id', route((req) => getRoomView(player(req), req.params.id)));
@@ -68,6 +99,7 @@ async function main() {
     res.status(500).json({ error: 'Error interno del servidor.' });
   });
 
+  initAuth();
   ensureSeedRooms();
   setInterval(() => cleanup(), 60 * 1000).unref();
 

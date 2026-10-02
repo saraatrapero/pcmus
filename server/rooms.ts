@@ -26,8 +26,6 @@ const IDLE_ROOM_MS = 30 * 60 * 1000; // rooms without any human for 30 min are r
 const HOST_ONLINE_MS = 15 * 1000;
 
 const rooms = new Map<string, ServerRoom>();
-// playerId -> secret token, so nobody can act on behalf of another player
-const playerTokens = new Map<string, string>();
 
 const now = () => Date.now();
 const clockTime = () => new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -97,18 +95,6 @@ const newCode = (isPrivate: boolean) => {
   }
   return `${isPrivate ? 'PRIV' : 'MUS'}-${randomBytes(3).toString('hex').toUpperCase()}`;
 };
-
-// ───────── identity ─────────
-
-export function authenticate(playerId: unknown, token: unknown): string {
-  const id = clean(playerId, 64);
-  const tok = clean(token, 128);
-  if (!/^[\w-]{6,64}$/.test(id) || tok.length < 16) throw new RoomError(401, 'Identificación de jugador no válida.');
-  const known = playerTokens.get(id);
-  if (known && known !== tok) throw new RoomError(403, 'Identificación de jugador no válida.');
-  if (!known) playerTokens.set(id, tok);
-  return id;
-}
 
 // ───────── views sent to clients ─────────
 

@@ -9,19 +9,23 @@ import { voiceEngine } from '../voiceEngine';
 interface MultiplayerLobbyProps {
   onBackToMenu: () => void;
   onStartGame: (room: MultiplayerRoom, localSeatIndex: number) => void;
+  defaultPlayerName?: string;
+  defaultCharacterId?: string;
 }
 
 export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   onBackToMenu,
   onStartGame,
+  defaultPlayerName = 'Musolari',
+  defaultCharacterId = 'tio_gil',
 }) => {
   const [activeTab, setActiveTab] = useState<'public' | 'create' | 'join_code'>('public');
   const [publicRooms, setPublicRooms] = useState<MultiplayerRoom[]>([]);
   const [currentRoom, setCurrentRoom] = useState<MultiplayerRoom | null>(null);
 
   // Player preferences
-  const [playerName, setPlayerName] = useState<string>('Musolari');
-  const [selectedCharId, setSelectedCharId] = useState<string>('tio_gil');
+  const [playerName, setPlayerName] = useState<string>(defaultPlayerName);
+  const [selectedCharId, setSelectedCharId] = useState<string>(defaultCharacterId);
 
   // Create room form state
   const [createRoomName, setCreateRoomName] = useState<string>('La Mesa de los Campeones');
@@ -291,7 +295,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="text-center opacity-30">
                 <div className="text-4xl font-display font-black text-brass-300">PC MUS</div>
-                <div className="text-xs font-mono text-stone-300">MESA VERDE DE 1996</div>
+                <div className="text-xs font-mono text-stone-300">MESA VERDE</div>
               </div>
             </div>
 

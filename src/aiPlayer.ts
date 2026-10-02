@@ -18,13 +18,26 @@ export interface LanceAIDecision {
   gesture?: string;
 }
 
+// Game levels. They change how well the rivals play:
+// - noise: random error added to the AI's reading of its own hand
+// - learn: how much it uses what it has learned about you (0 = nothing, 1 = everything)
+// - rivalIntel: whether it uses the señas it caught from you
+// - blunder: chance of simply playing a random legal move
+export type Difficulty = 'facil' | 'medio' | 'dificil';
+export const DIFFICULTY_SETTINGS: Record<Difficulty, { noise: number; learn: number; rivalIntel: boolean; blunder: number; smart: boolean }> = {
+  facil: { noise: 2.5, learn: 0, rivalIntel: false, blunder: 0.15, smart: false },
+  medio: { noise: 1, learn: 0.6, rivalIntel: true, blunder: 0.03, smart: false },
+  dificil: { noise: 0, learn: 1, rivalIntel: true, blunder: 0, smart: true },
+};
+
 // What the AI's team has learned through señas this hand
 export interface SeñaIntel {
   partnerSeñas: string[]; // señas received from the partner
   rivalSeñas: string[]; // señas caught from the rivals
 }
 
-export function decideMusOrNoMus(player: Player): { wantsMus: boolean; speech: string } {
+export function decideMusOrNoMus(player: Player, difficulty: Difficulty = 'medio'): { wantsMus: boolean; speech: string } {
+  const level = DIFFICULTY_SETTINGS[difficulty];
   const char = PC_MUS_CHARACTERS.find((c) => c.id === player.id) || PC_MUS_CHARACTERS[0];
   const handSum = getHandSum(player.cards);
   const paresEval = evaluatePares(player.cards);
@@ -46,11 +59,15 @@ export function decideMusOrNoMus(player: Player): { wantsMus: boolean; speech: s
   // If user is a rival and has high mus tendency (always wants discards), rival AI cuts mus more aggressively
   let cutBonus = 0;
   if (isRivalTeam && tactical.musTendency >= 70 && isGoodHand) {
-    cutBonus = 0.25; // Cut mus to deny user easy improvements
+    cutBonus = 0.25 * level.learn; // Cut mus to deny user easy improvements
   }
 
-  // AI may decide to cut mus based on aggression + tactical learning
-  const wantsToCut = isSuperbHand || (isGoodHand && Math.random() < (player.aggressiveness + cutBonus));
+  // AI may decide to cut mus based on aggression + tactical learning.
+  // On easy, it sometimes keeps asking for mus with a great hand (or cuts with a poor one).
+  const sloppy = !level.smart && Math.random() < level.blunder * 2;
+  const wantsToCut = sloppy
+    ? Math.random() < 0.5
+    : isSuperbHand || (isGoodHand && Math.random() < player.aggressiveness + cutBonus);
 
   if (wantsToCut) {
     const quote = char.dialogs.noMus[Math.floor(Math.random() * char.dialogs.noMus.length)];
@@ -102,8 +119,10 @@ export function decideLanceAction(
   betState: LanceBetState,
   teamScore: number,
   rivalScore: number,
-  intel?: SeñaIntel
+  intel?: SeñaIntel,
+  difficulty: Difficulty = 'medio'
 ): LanceAIDecision {
+  const level = DIFFICULTY_SETTINGS[difficulty];
   const char = PC_MUS_CHARACTERS.find((c) => c.id === player.id) || PC_MUS_CHARACTERS[0];
   const handSum = getHandSum(player.cards);
   const pares = evaluatePares(player.cards);
@@ -142,6 +161,9 @@ export function decideLanceAction(
     else strength = 3;
   }
 
+  // Easy rivals misread their own cards; hard ones read them exactly
+  if (level.noise > 0) strength += (Math.random() - 0.5) * 2 * level.noise;
+
   // Señas: knowing the partner's cards lets the AI play the team's hand,
   // knowing the rivals' cards lets it avoid traps and punish weak hands.
   let rivalKnownStrong = false;
@@ -150,7 +172,7 @@ export function decideLanceAction(
     if (partnerEst !== undefined) {
       strength = Math.max(strength, partnerEst) + (partnerEst >= 6 ? 0.5 : 0);
     }
-    const rivalEst = maxSeñaStrength(intel.rivalSeñas, lance);
+    const rivalEst = level.rivalIntel ? maxSeñaStrength(intel.rivalSeñas, lance) : undefined;
     if (rivalEst !== undefined) {
       if (rivalEst >= strength + 1) {
         strength -= 2.5;
@@ -161,8 +183,16 @@ export function decideLanceAction(
     }
   }
 
+  // What the AI has learned about you (weighted by the game level)
+  const isRivalOfUser = player.team === 1;
+  const tactical = userProfileEngine.analyzeUser();
+  const learn = isRivalOfUser ? level.learn : 0;
+  // You give up easily when somebody bets → the AI bluffs more against you
+  const youFoldOften = learn > 0 && (tactical.foldRate ?? 0) >= 60;
+
   // Factor in bluff probability (nobody bluffs into a hand they know is better)
-  const isBluffing = !rivalKnownStrong && Math.random() < player.bluffRate * 0.35;
+  const bluffChance = player.bluffRate * 0.35 + (youFoldOften && betState.currentBet === 0 ? 0.15 * learn : 0);
+  const isBluffing = !rivalKnownStrong && Math.random() < bluffChance;
   if (isBluffing) {
     strength += 4;
   }
@@ -171,9 +201,13 @@ export function decideLanceAction(
   const isMatchPoint = teamScore >= 35 || rivalScore >= 35;
 
   // Adaptive Learning Counter-Strategy against the human user (Seat 0)
-  const isRivalOfUser = player.team === 1;
-  const tactical = userProfileEngine.analyzeUser();
-  const counter = tactical.aiCounterStrategy;
+  const fullCounter = tactical.aiCounterStrategy;
+  const counter = {
+    ...fullCounter,
+    callThresholdShift: fullCounter.callThresholdShift * learn,
+    raiseTendencyShift: fullCounter.raiseTendencyShift * learn,
+    trapTendency: fullCounter.trapTendency * learn,
+  };
   const userWasLastBettor = betState.lastBettorIndex === 0;
 
   // Effective thresholds modified by what the AI has learned from the user
@@ -185,6 +219,26 @@ export function decideLanceAction(
     // If user is amarrategui, AI call threshold increases (respects bet, folds weak hands)
     callThreshold += counter.callThresholdShift;
     ordagoCallThreshold += (counter.callThresholdShift * 0.5);
+    // Learned for THIS lance: if you bluff here a lot, the AI calls you; if you never do, it believes you
+    const lanceBluff = tactical.lanceBluffRate?.[lance];
+    if (lanceBluff !== null && lanceBluff !== undefined) {
+      if (lanceBluff >= 40) {
+        callThreshold -= 1.5 * learn;
+        ordagoCallThreshold -= 0.8 * learn;
+      } else if (lanceBluff <= 10) {
+        callThreshold += 1.5 * learn;
+        ordagoCallThreshold += 0.8 * learn;
+      }
+    }
+  }
+
+  // Easy level: now and then a plain mistake
+  if (level.blunder > 0 && Math.random() < level.blunder) {
+    const options: LanceActionType[] = betState.currentBet === 0 ? ['paso', 'envido'] : ['quiero', 'no_quiero'];
+    const action = options[Math.floor(Math.random() * options.length)];
+    const pool =
+      action === 'envido' ? char.dialogs.envido : action === 'quiero' ? char.dialogs.quiero : action === 'no_quiero' ? char.dialogs.noQuiero : ['Paso.'];
+    return { action, speech: pool[Math.floor(Math.random() * pool.length)] || 'Paso.' };
   }
 
   // SCENARIO 1: No bet yet (currentBet === 0)
@@ -196,7 +250,7 @@ export function decideLanceAction(
     }
 
     // Should we Órdago?
-    const ordagoPressure = (isRivalOfUser && tactical.riskTolerance <= 35) ? 0.2 : 0;
+    const ordagoPressure = (isRivalOfUser && tactical.riskTolerance <= 35) ? 0.2 * learn : 0;
     if (
       (strength >= 9.5 && Math.random() < (player.aggressiveness + ordagoPressure)) ||
       (isMatchPoint && strength >= 7) ||
@@ -208,7 +262,11 @@ export function decideLanceAction(
 
     // Should we Envido?
     // Against an amarrategui user, AI steals pots easily with moderate strength (>= 3.8)
-    const stealThreshold = (isRivalOfUser && tactical.aggressiveness <= 35) ? 3.8 : 5.0;
+    let stealThreshold = (isRivalOfUser && learn > 0 && tactical.aggressiveness <= 35) ? 5.0 - 1.2 * learn : 5.0;
+    if (youFoldOften) stealThreshold -= 0.8 * learn;
+    // Hard level: when everybody before has passed, a medium hand is enough to take the stone
+    const passesSoFar = betState.history.filter((h) => h.action === 'paso').length;
+    if (level.smart && passesSoFar >= 2) stealThreshold -= 1;
     if (strength >= stealThreshold || (Math.random() < (player.aggressiveness + counter.raiseTendencyShift) * 0.6)) {
       const speech = char.dialogs.envido[Math.floor(Math.random() * char.dialogs.envido.length)];
       return { action: 'envido', speech };

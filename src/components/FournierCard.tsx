@@ -52,7 +52,6 @@ export const FournierCard: React.FC<FournierCardProps> = ({
             <span className="font-serif font-black text-[10px] text-amber-300 tracking-tighter">
               MUS
             </span>
-            <span className="text-[7px] font-mono font-bold text-amber-400">1996</span>
           </div>
         </div>
       </div>

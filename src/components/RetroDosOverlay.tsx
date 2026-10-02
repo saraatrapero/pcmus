@@ -13,6 +13,10 @@ interface RetroDosOverlayProps {
   gameMode: string;
   gameSpeed?: 'tranquilo' | 'normal' | 'rapido';
   onChangeGameSpeed?: () => void;
+  userName?: string;
+  isAdmin?: boolean;
+  onOpenAdmin?: () => void;
+  onLogout?: () => void;
 }
 
 export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
@@ -26,6 +30,10 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
   gameMode,
   gameSpeed = 'tranquilo',
   onChangeGameSpeed,
+  userName,
+  isAdmin = false,
+  onOpenAdmin,
+  onLogout,
 }) => {
   const [soundMuted, setSoundMuted] = React.useState(!sound.enabled);
   const [voiceEnabled, setVoiceEnabled] = React.useState(voiceEngine.enabled);
@@ -61,7 +69,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
       <header className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-brass-500/30 bg-gradient-to-b from-[#1f1108] to-[#130a04] rounded-b-2xl mb-2 select-none shadow-[0_8px_20px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-2 shrink-0">
           <span className="font-display whitespace-nowrap font-black text-brass-400 text-lg tracking-wider drop-shadow-[0_2px_0_rgba(0,0,0,0.6)]">
-            PC MUS <span className="text-xs text-stone-400 font-mono">1996</span>
+            PC MUS
           </span>
           <span className="bg-amber-950 text-amber-300 text-[10px] px-2 py-0.5 rounded border border-amber-600/40 uppercase font-mono hidden sm:inline">
             {gameMode === 'torneo'
@@ -81,7 +89,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
               title="Control de usuarios y aprendizaje adaptativo de la IA"
             >
               <span>🧠</span>
-              <span className="hidden sm:inline">IA & Usuarios</span>
+              <span className="hidden sm:inline">Tu perfil IA</span>
             </button>
           )}
 
@@ -152,7 +160,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
                 ? 'bg-amber-500 text-stone-950 border-amber-400'
                 : 'bg-stone-900 hover:bg-stone-800 border-stone-700 text-stone-300'
             }`}
-            title="Efecto monitor tubo CRT MS-DOS 1996"
+            title="Efecto monitor de tubo CRT"
           >
             <span>📺</span>
             <span className="hidden sm:inline">Modo CRT</span>
@@ -166,6 +174,31 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
             <span>📜</span>
             <span className="hidden sm:inline">Reglas</span>
           </button>
+
+          {/* Administrator: manage users */}
+          {isAdmin && onOpenAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="px-2.5 py-1 rounded-lg bg-amber-900/70 hover:bg-amber-800 border border-amber-500/70 text-xs font-bold text-amber-200 transition flex items-center gap-1"
+              title="Crear, editar y borrar usuarios"
+            >
+              <span>👥</span>
+              <span className="hidden sm:inline">Usuarios</span>
+            </button>
+          )}
+
+          {/* Logged-in user & logout */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 border border-stone-700 text-xs font-bold text-stone-200 transition flex items-center gap-1 max-w-[160px]"
+              title="Cerrar sesión"
+            >
+              <span>👤</span>
+              <span className="truncate hidden sm:inline">{userName}</span>
+              <span className="text-stone-400">· Salir</span>
+            </button>
+          )}
 
           {/* Exit / Menu */}
           <button

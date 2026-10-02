@@ -1,4 +1,4 @@
-// Web Speech Synthesis engine with tailored Spanish vocal acting for PC Mus 1996 characters
+// Web Speech Synthesis engine with tailored Spanish vocal acting for PC Mus characters
 
 export interface CharacterVoiceProfile {
   id: string;

@@ -1,9 +1,15 @@
 // userProfileEngine.ts - Control de Usuarios y Motor de Aprendizaje de Estilo de Juego para la IA
+// With login, the active profile belongs to the logged-in account and is stored on the server.
+import { authService } from './auth/authService';
 
 export interface LanceStats {
   bets: number;    // Veces que envidó o subió
   checks: number;  // Veces que pasó
+  bluffs?: number; // Apuestas con mano débil en este lance
+  values?: number; // Apuestas con mano fuerte en este lance
 }
+
+export type LanceName = 'grande' | 'chica' | 'pares' | 'juego' | 'punto';
 
 export interface UserPlaystyle {
   totalActions: number;
@@ -18,6 +24,10 @@ export interface UserPlaystyle {
   ordagoRefused: number;    // Veces que rechazó un órdago
   bluffBets: number;        // Apuestas realizadas con mano débil (< 5.0 de fuerza)
   valueBets: number;        // Apuestas con mano fuerte (>= 6.0)
+  quieroCount?: number;     // Envites (no órdago) aceptados
+  noQuieroCount?: number;   // Envites (no órdago) rechazados
+  weakFolds?: number;       // Se retiró con mano débil (correcto)
+  strongFolds?: number;     // Se retiró con mano buena (se le puede robar)
   lances: {
     grande: LanceStats;
     chica: LanceStats;
@@ -61,6 +71,10 @@ export interface TacticalAnalysis {
     bluffRespectShift: number;    // Si el usuario no farolea nunca, respeta sus apuestas
     trapTendency: number;         // Probabilidad de slow-play / tender trampa
   };
+  // Learned per lance: how often the user bluffs there (0-100), null = not enough data
+  lanceBluffRate: Record<LanceName, number | null>;
+  // How often the user gives up when somebody bets (0-100), null = not enough data
+  foldRate: number | null;
 }
 
 const STORAGE_PROFILES_KEY = 'pcmus_user_profiles_v1';
@@ -79,14 +93,28 @@ const defaultPlaystyle = (): UserPlaystyle => ({
   ordagoRefused: 0,
   bluffBets: 0,
   valueBets: 0,
+  quieroCount: 0,
+  noQuieroCount: 0,
+  weakFolds: 0,
+  strongFolds: 0,
   lances: {
-    grande: { bets: 0, checks: 0 },
-    chica: { bets: 0, checks: 0 },
-    pares: { bets: 0, checks: 0 },
-    juego: { bets: 0, checks: 0 },
-    punto: { bets: 0, checks: 0 },
+    grande: { bets: 0, checks: 0, bluffs: 0, values: 0 },
+    chica: { bets: 0, checks: 0, bluffs: 0, values: 0 },
+    pares: { bets: 0, checks: 0, bluffs: 0, values: 0 },
+    juego: { bets: 0, checks: 0, bluffs: 0, values: 0 },
+    punto: { bets: 0, checks: 0, bluffs: 0, values: 0 },
   },
 });
+
+// Older saved data may miss fields: complete everything (also the nested lances)
+const normalizePlaystyle = (ps: Partial<UserPlaystyle> | undefined): UserPlaystyle => {
+  const base = defaultPlaystyle();
+  const merged: UserPlaystyle = { ...base, ...(ps || {}), lances: { ...base.lances } };
+  (Object.keys(base.lances) as LanceName[]).forEach((l) => {
+    merged.lances[l] = { ...base.lances[l], ...((ps?.lances as any)?.[l] || {}) };
+  });
+  return merged;
+};
 
 export const DEFAULT_PROFILES: UserProfile[] = [
   {
@@ -118,7 +146,7 @@ class UserProfileEngine {
         const parsed = JSON.parse(storedProfiles);
         this.profiles = (Array.isArray(parsed) ? parsed : [])
           .filter((p: Partial<UserProfile>) => p && typeof p.id === 'string')
-          .map((p: UserProfile) => ({ ...p, playstyle: { ...defaultPlaystyle(), ...(p.playstyle || {}) } }));
+          .map((p: UserProfile) => ({ ...p, playstyle: normalizePlaystyle(p.playstyle) }));
         if (this.profiles.length === 0) this.profiles = [...DEFAULT_PROFILES];
       } else {
         this.profiles = [...DEFAULT_PROFILES];
@@ -137,7 +165,63 @@ class UserProfileEngine {
     }
   }
 
+  // ───────── logged-in account ─────────
+  private serverUserId: string | null = null;
+  private serverSaveTimer: number | undefined;
+
+  // Use the logged-in user's profile (loaded from the server) as the only active profile
+  public attachServerUser(user: { id: string; displayName: string; avatarId: string; createdAt: number }, data: any) {
+    const stored = data && typeof data === 'object' ? data : {};
+    const profile: UserProfile = {
+      id: user.id,
+      name: user.displayName,
+      avatarId: user.avatarId,
+      createdAt: user.createdAt,
+      handsPlayed: Number(stored.handsPlayed) || 0,
+      matchesWon: Number(stored.matchesWon) || 0,
+      matchesLost: Number(stored.matchesLost) || 0,
+      piedrasWon: Number(stored.piedrasWon) || 0,
+      playstyle: normalizePlaystyle(stored.playstyle),
+    };
+    this.serverUserId = user.id;
+    this.profiles = [profile];
+    this.activeUserId = user.id;
+    this.notifyListeners();
+  }
+
+  public detachServerUser() {
+    if (this.serverSaveTimer) window.clearTimeout(this.serverSaveTimer);
+    this.serverUserId = null;
+    this.profiles = [...DEFAULT_PROFILES];
+    this.activeUserId = DEFAULT_PROFILES[0].id;
+    this.notifyListeners();
+  }
+
+  private pushToServer() {
+    if (this.serverSaveTimer) window.clearTimeout(this.serverSaveTimer);
+    this.serverSaveTimer = window.setTimeout(() => {
+      const u = this.getActiveUser();
+      if (!this.serverUserId || u.id !== this.serverUserId) return;
+      authService
+        .saveProfile({
+          handsPlayed: u.handsPlayed,
+          matchesWon: u.matchesWon,
+          matchesLost: u.matchesLost,
+          piedrasWon: u.piedrasWon,
+          playstyle: u.playstyle,
+        })
+        .catch(() => {
+          /* will be sent again with the next change */
+        });
+    }, 1500);
+  }
+
   public save(): void {
+    if (this.serverUserId) {
+      this.notifyListeners();
+      this.pushToServer();
+      return;
+    }
     try {
       localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(this.profiles));
       localStorage.setItem(STORAGE_ACTIVE_ID_KEY, this.activeUserId);
@@ -254,6 +338,12 @@ class UserProfileEngine {
       ps.ordagoFaced++;
       if (baseAction === 'quiero') ps.ordagoAccepted++;
       if (baseAction === 'no_quiero') ps.ordagoRefused++;
+    } else if (baseAction === 'quiero') {
+      ps.quieroCount = (ps.quieroCount || 0) + 1;
+    } else if (baseAction === 'no_quiero') {
+      ps.noQuieroCount = (ps.noQuieroCount || 0) + 1;
+      if (handStrength >= 5.5) ps.strongFolds = (ps.strongFolds || 0) + 1;
+      else ps.weakFolds = (ps.weakFolds || 0) + 1;
     }
 
     // Análisis de Farol vs Valor
@@ -270,6 +360,8 @@ class UserProfileEngine {
     if (lance && ps.lances[lance]) {
       if (isAggressiveBet) {
         ps.lances[lance].bets++;
+        if (handStrength < 5.0) ps.lances[lance].bluffs = (ps.lances[lance].bluffs || 0) + 1;
+        else if (handStrength >= 6.0) ps.lances[lance].values = (ps.lances[lance].values || 0) + 1;
       } else if (action === 'paso') {
         ps.lances[lance].checks++;
       }
@@ -300,8 +392,17 @@ class UserProfileEngine {
    * y calcula cómo debe adaptarse la IA para ganarle.
    */
   public analyzeUser(user: UserProfile = this.getActiveUser()): TacticalAnalysis {
-    const ps = user.playstyle;
+    const ps = normalizePlaystyle(user.playstyle);
     const totalBettingOpportunities = ps.pasoCount + ps.envidoCount + ps.masCount + ps.ordagoCount;
+    // Per-lance bluffing and folding, learned from at least a few decisions
+    const lanceBluffRate = {} as Record<LanceName, number | null>;
+    (Object.keys(ps.lances) as LanceName[]).forEach((l) => {
+      const st = ps.lances[l];
+      const judged = (st.bluffs || 0) + (st.values || 0);
+      lanceBluffRate[l] = judged >= 3 ? Math.round(((st.bluffs || 0) / judged) * 100) : null;
+    });
+    const answers = (ps.quieroCount || 0) + (ps.noQuieroCount || 0);
+    const foldRate = answers >= 4 ? Math.round(((ps.noQuieroCount || 0) / answers) * 100) : null;
 
     // Si aún no hay suficientes datos (primeras manos), usamos un perfil equilibrado con aprendizaje inicial
     if (totalBettingOpportunities < 4) {
@@ -320,6 +421,8 @@ class UserProfileEngine {
           bluffRespectShift: 0,
           trapTendency: 0.2,
         },
+        lanceBluffRate,
+        foldRate,
       };
     }
 
@@ -412,6 +515,8 @@ class UserProfileEngine {
         bluffRespectShift,
         trapTendency,
       },
+      lanceBluffRate,
+      foldRate,
     };
   }
 }

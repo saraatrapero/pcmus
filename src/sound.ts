@@ -1,4 +1,4 @@
-// Web Audio procedural sound effects for retro PC Mus 1996 experience
+// Web Audio procedural sound effects for PC Mus
 class SoundController {
   private ctx: AudioContext | null = null;
   public enabled: boolean = true;

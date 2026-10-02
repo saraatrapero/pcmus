@@ -1,3 +1,4 @@
+import type { Difficulty } from '../aiPlayer';
 import React, { useState } from 'react';
 import { PC_MUS_CHARACTERS, CharacterInfo } from '../characters';
 import { GameMode } from '../types';
@@ -17,13 +18,23 @@ interface CharacterSelectProps {
   onOpenMultiplayer: () => void;
   onOpenTutorial: () => void;
   onOpenUserControl?: () => void;
+  difficulty?: Difficulty;
+  onChangeDifficulty?: (d: Difficulty) => void;
 }
+
+const LEVELS: { id: Difficulty; label: string; icon: string; hint: string }[] = [
+  { id: 'facil', label: 'Fácil', icon: '🌱', hint: 'Los rivales se equivocan, no aprovechan tus señas ni lo que saben de ti.' },
+  { id: 'medio', label: 'Medio', icon: '⚖️', hint: 'Rivales sensatos que usan parte de lo que han aprendido de tu juego.' },
+  { id: 'dificil', label: 'Difícil', icon: '🔥', hint: 'Leen bien sus cartas, cazan tus faroles y explotan cada costumbre tuya.' },
+];
 
 export const CharacterSelect: React.FC<CharacterSelectProps> = ({
   onStartGame,
   onOpenMultiplayer,
   onOpenTutorial,
   onOpenUserControl,
+  difficulty = 'medio',
+  onChangeDifficulty,
 }) => {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('tio_gil');
   const [selectedPartnerId, setSelectedPartnerId] = useState<string>('el_marques');
@@ -52,16 +63,13 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
 
   return (
     <div className="max-w-5xl mx-auto my-4 p-4 sm:p-6 bg-stone-900 border-2 border-amber-600 rounded-3xl shadow-2xl text-stone-100 font-sans">
-      {/* MS-DOS 1996 Header */}
+      {/* Header */}
       <div className="text-center border-b border-stone-800 pb-5 mb-5">
-        <div className="inline-block px-3 py-1 bg-amber-950 border border-amber-600 text-amber-300 font-mono text-xs font-bold rounded mb-2 tracking-widest">
-          CÍRCULO ASM & LIT • MS-DOS 1996
-        </div>
         <h1 className="text-4xl sm:text-6xl font-black font-display tracking-[0.12em] bg-gradient-to-b from-brass-300 via-brass-400 to-brass-600 bg-clip-text text-transparent drop-shadow-[0_3px_0_rgba(0,0,0,0.55)]">
           PC MUS
         </h1>
         <p className="text-sm sm:text-base text-stone-300/90 mt-1 max-w-xl mx-auto font-serif italic">
-          El legendario simulador de mus español con los personajes de la farándula de los 90.
+          El mus español de siempre, con personajes de la farándula, señas y torneo.
         </p>
 
         {/* User Profile & AI Intelligence Bar */}
@@ -87,7 +95,7 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
               onClick={onOpenUserControl}
               className="sm:ml-3 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs shadow transition active:scale-95 cursor-pointer whitespace-nowrap"
             >
-              👤 Control de Usuarios & IA
+              🧠 Lo que la IA sabe de ti
             </button>
           </div>
         )}
@@ -233,6 +241,28 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
               30 Piedras (6 Amarracos)
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Game level */}
+      <div className="bg-stone-950/80 p-4 rounded-2xl border border-stone-800 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <span className="text-xs font-bold uppercase text-stone-400 font-serif shrink-0">Nivel de juego:</span>
+          <div className="flex bg-stone-900 p-1 rounded-xl border border-stone-700">
+            {LEVELS.map((lvl) => (
+              <button
+                key={lvl.id}
+                onClick={() => onChangeDifficulty?.(lvl.id)}
+                className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-lg text-xs font-bold transition ${
+                  difficulty === lvl.id ? 'bg-amber-500 text-stone-950 shadow' : 'text-stone-400 hover:text-white'
+                }`}
+                aria-pressed={difficulty === lvl.id}
+              >
+                {lvl.icon} {lvl.label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11px] text-stone-400">{LEVELS.find((l) => l.id === difficulty)?.hint}</span>
         </div>
       </div>
 

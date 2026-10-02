@@ -92,10 +92,10 @@ export const UserControlModal: React.FC<UserControlModalProps> = ({
             <span className="text-2xl">🧠</span>
             <div>
               <h2 className="font-serif font-black text-amber-300 text-base sm:text-lg tracking-wide">
-                CONTROL DE USUARIOS & APRENDIZAJE IA
+                LO QUE LA IA HA APRENDIDO DE TI
               </h2>
               <p className="text-[10px] sm:text-xs font-mono text-stone-400">
-                La IA aprende el estilo de juego de cada usuario para contrarrestarle
+                La IA estudia tu forma de jugar y la usa para tomar mejores decisiones
               </p>
             </div>
           </div>
@@ -105,32 +105,6 @@ export const UserControlModal: React.FC<UserControlModalProps> = ({
             title="Cerrar ventana"
           >
             ✕
-          </button>
-        </div>
-
-        {/* Tab Switcher */}
-        <div className="flex border-b border-stone-800 bg-stone-900/90 text-xs font-mono font-bold">
-          <button
-            onClick={() => setActiveTab('ai_analysis')}
-            className={`flex-1 py-2.5 text-center flex items-center justify-center gap-1.5 transition ${
-              activeTab === 'ai_analysis'
-                ? 'bg-stone-950 text-amber-400 border-b-2 border-amber-500'
-                : 'text-stone-400 hover:text-stone-200'
-            }`}
-          >
-            <span>🎯</span>
-            <span>Perfil Táctico & Aprendizaje IA</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('profiles')}
-            className={`flex-1 py-2.5 text-center flex items-center justify-center gap-1.5 transition ${
-              activeTab === 'profiles'
-                ? 'bg-stone-950 text-amber-400 border-b-2 border-amber-500'
-                : 'text-stone-400 hover:text-stone-200'
-            }`}
-          >
-            <span>👤</span>
-            <span>Gestión de Usuarios ({profiles.length})</span>
           </button>
         </div>
 
@@ -333,159 +307,44 @@ export const UserControlModal: React.FC<UserControlModalProps> = ({
                   </div>
                 </div>
               </div>
+              {/* Learned per lance */}
+              <div className="bg-stone-900/60 border border-stone-800 rounded-2xl p-3">
+                <h4 className="text-xs font-mono font-bold text-amber-300 mb-2">Lo que sabe de ti en cada lance</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] font-mono">
+                  {(['grande', 'chica', 'pares', 'juego', 'punto'] as const).map((l) => {
+                    const v = analysis.lanceBluffRate?.[l];
+                    return (
+                      <div key={l} className="bg-stone-950 p-2 rounded-lg border border-stone-800">
+                        <span className="text-stone-400 block text-[9px] uppercase">{l}</span>
+                        <span className="text-amber-200 font-bold">
+                          {v === null || v === undefined ? 'Aún aprendiendo' : `${v}% faroles`}
+                        </span>
+                        {v !== null && v !== undefined && (
+                          <span className="block text-[9px] text-stone-500">
+                            {v >= 40 ? 'Te pagará los envites' : v <= 10 ? 'Se cree tus envites' : 'Te lee con cuidado'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11px] text-stone-400">
+                  {analysis.foldRate === null
+                    ? 'Todavía está viendo cómo respondes cuando te envidan.'
+                    : analysis.foldRate >= 60
+                    ? `Te retiras en el ${analysis.foldRate}% de los envites: la IA te faroleará más.`
+                    : `Aceptas a menudo los envites (te retiras en el ${analysis.foldRate}%): la IA solo apostará con buenas cartas.`}
+                </p>
+              </div>
             </>
           )}
 
-          {activeTab === 'profiles' && (
-            <div className="space-y-3">
-              {/* User List */}
-              <div className="space-y-2">
-                {profiles.map((profile) => {
-                  const isCurrent = profile.id === activeUser.id;
-                  const profAnalysis = userProfileEngine.analyzeUser(profile);
-                  return (
-                    <div
-                      key={profile.id}
-                      className={`p-3 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
-                        isCurrent
-                          ? 'bg-amber-950/40 border-amber-500 shadow-md'
-                          : 'bg-stone-900 border-stone-800 hover:border-stone-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <CharacterAvatar
-                          characterId={profile.avatarId}
-                          characterName={profile.name}
-                          size="md"
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-serif font-black text-amber-200 text-sm sm:text-base">
-                              {profile.name}
-                            </span>
-                            {isCurrent && (
-                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-400 text-stone-950">
-                                SELECCIONADO
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] font-mono text-stone-400 flex items-center gap-2 mt-0.5">
-                            <span>Arquetipo: <strong className="text-amber-300">{profAnalysis.archetype}</strong></span>
-                            <span>•</span>
-                            <span>Manos: {profile.handsPlayed}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 self-end sm:self-auto">
-                        {!isCurrent && (
-                          <button
-                            onClick={() => handleSelectUser(profile.id)}
-                            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-mono font-black text-xs transition active:scale-95 shadow"
-                          >
-                            Seleccionar
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleResetStats(profile.id)}
-                          className="px-2 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-mono border border-stone-700 transition"
-                          title="Reiniciar aprendizaje de la IA para este usuario"
-                        >
-                          Reiniciar IA
-                        </button>
-                        {profiles.length > 1 && (
-                          <button
-                            onClick={() => handleDeleteUser(profile.id)}
-                            className="px-2 py-1.5 rounded-xl bg-stone-800 hover:bg-rose-900/60 text-stone-400 hover:text-rose-200 text-xs font-mono border border-stone-700 transition"
-                            title="Eliminar perfil"
-                          >
-                            🗑️
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Create User Form or Button */}
-              {!isCreating ? (
-                <button
-                  onClick={() => setIsCreating(true)}
-                  className="w-full py-3 rounded-2xl border-2 border-dashed border-amber-600/70 hover:border-amber-400 bg-stone-900/50 hover:bg-stone-900 text-amber-300 font-mono font-bold text-xs flex items-center justify-center gap-2 transition"
-                >
-                  <span>➕</span>
-                  <span>Crear Nuevo Perfil de Jugador</span>
-                </button>
-              ) : (
-                <form
-                  onSubmit={handleCreateUser}
-                  className="p-4 rounded-2xl bg-stone-900 border-2 border-amber-500/70 space-y-3"
-                >
-                  <h4 className="font-serif font-black text-amber-300 text-xs uppercase tracking-wider">
-                    Nuevo Perfil de Usuario
-                  </h4>
-                  <div>
-                    <label className="text-[10px] font-mono text-stone-400 block mb-1">
-                      Nombre del Jugador:
-                    </label>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder="Ej. Juan, El Maestro, Pedro..."
-                      maxLength={20}
-                      autoFocus
-                      className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-700 text-stone-100 font-mono text-xs focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-mono text-stone-400 block mb-1">
-                      Elige Avatar:
-                    </label>
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                      {PC_MUS_CHARACTERS.map((char) => (
-                        <button
-                          key={char.id}
-                          type="button"
-                          onClick={() => setNewAvatar(char.id)}
-                          className={`p-1 rounded-xl border-2 transition ${
-                            newAvatar === char.id ? 'border-amber-400 scale-105' : 'border-stone-800 opacity-60'
-                          }`}
-                        >
-                          <CharacterAvatar characterId={char.id} characterName={char.name} size="sm" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsCreating(false)}
-                      className="px-3 py-1.5 rounded-xl bg-stone-800 text-stone-400 hover:text-stone-200 text-xs font-mono"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={!newName.trim()}
-                      className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-stone-950 font-mono font-black text-xs shadow transition active:scale-95"
-                    >
-                      Guardar y Jugar
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Modal Footer */}
         <div className="bg-stone-900 px-5 py-2.5 border-t border-stone-800 flex items-center justify-between text-xs font-mono">
           <span className="text-stone-400 text-[10px]">
-            Los datos se guardan automáticamente en tu dispositivo local.
+            Se guarda en tu cuenta: la IA te reconoce en cualquier dispositivo.
           </span>
           <button
             onClick={onClose}

@@ -1,16 +1,9 @@
 // Online rooms client: talks to the PC Mus server (server.ts) over plain HTTP.
 // Polling is used instead of WebSockets so it works behind any proxy (AI Studio, Cloud Run).
 import { MultiplayerRoom, NetAction } from '../types';
+import { authService } from '../auth/authService';
 
-const PLAYER_ID_KEY = 'pc_mus_player_id';
-const PLAYER_TOKEN_KEY = 'pc_mus_player_token';
 const ACTIVE_ROOM_KEY = 'pc_mus_active_room';
-
-const randomId = (bytes: number) => {
-  const arr = new Uint8Array(bytes);
-  (globalThis.crypto || ({} as Crypto)).getRandomValues?.(arr);
-  return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('') || Math.random().toString(36).slice(2);
-};
 
 const storage = {
   get(key: string) {
@@ -39,22 +32,11 @@ export interface PlayerInfo {
 }
 
 class MultiplayerService {
-  private playerId: string;
-  private token: string;
+  // Online identity = the logged-in account (set by the app after login)
+  private playerId = '';
 
-  constructor() {
-    let id = storage.get(PLAYER_ID_KEY);
-    if (!id || !/^[\w-]{6,64}$/.test(id)) {
-      id = `user-${randomId(5)}`;
-      storage.set(PLAYER_ID_KEY, id);
-    }
-    let token = storage.get(PLAYER_TOKEN_KEY);
-    if (!token || token.length < 16) {
-      token = randomId(16);
-      storage.set(PLAYER_TOKEN_KEY, token);
-    }
+  public setPlayerId(id: string) {
     this.playerId = id;
-    this.token = token;
   }
 
   public getPlayerId(): string {
@@ -74,11 +56,7 @@ class MultiplayerService {
     try {
       res = await fetch(`/api${path}`, {
         method,
-        headers: {
-          'content-type': 'application/json',
-          'x-player-id': this.playerId,
-          'x-player-token': this.token,
-        },
+        headers: { 'content-type': 'application/json', ...authService.authHeaders() },
         body: body === undefined ? undefined : JSON.stringify(body),
         cache: 'no-store',
       });
