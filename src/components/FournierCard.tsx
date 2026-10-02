@@ -101,145 +101,90 @@ export const FournierCard: React.FC<FournierCardProps> = ({
     return null;
   };
 
-  // Spanish Suit Icons (Oros, Copas, Espadas, Bastos)
-  const renderSuitIcon = (isLarge = false) => {
-    const dim = isLarge
-      ? isHandSize
-        ? 'w-10 h-10 sm:w-12 sm:h-12'
-        : 'w-7 h-7'
-      : isHandSize
-      ? 'w-4 h-4'
-      : 'w-3 h-3';
-
+  // Traditional Spanish suit drawings (flat colours, high contrast)
+  const suitGlyph = (cls: string = '') => {
     if (suit === 'oros') {
       return (
-        <svg viewBox="0 0 48 48" className={`${dim} flex-shrink-0 drop-shadow`} fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="24" cy="24" r="22" fill="url(#oro_base)" stroke="#78350f" strokeWidth="2.5" />
-          <circle cx="24" cy="24" r="17" stroke="#b45309" strokeWidth="1.5" strokeDasharray="2 1.5" />
-          <circle cx="24" cy="24" r="11" fill="#fef08a" stroke="#92400e" strokeWidth="1.5" />
-          <path d="M24 14L26 21L33 21L27.5 25L29.5 32L24 28L18.5 32L20.5 25L15 21L22 21Z" fill="#d97706" stroke="#78350f" strokeWidth="0.8" />
-          <circle cx="24" cy="24" r="3.5" fill="#b45309" />
-          <defs>
-            <linearGradient id="oro_base" x1="6" y1="6" x2="42" y2="42" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#fef08a" />
-              <stop offset="0.4" stopColor="#fbbf24" />
-              <stop offset="0.8" stopColor="#d97706" />
-              <stop offset="1" stopColor="#92400e" />
-            </linearGradient>
-          </defs>
+        <svg viewBox="0 0 40 40" className={cls} aria-hidden="true">
+          <circle cx="20" cy="20" r="18" fill="#f1b52e" stroke="#6b3d03" strokeWidth="2" />
+          <circle cx="20" cy="20" r="13.5" fill="none" stroke="#c0392b" strokeWidth="2.2" />
+          <circle cx="20" cy="20" r="9" fill="#f8d56b" stroke="#6b3d03" strokeWidth="1.2" />
+          <path d="M20 13.5 L21.8 18.2 L26.5 20 L21.8 21.8 L20 26.5 L18.2 21.8 L13.5 20 L18.2 18.2 Z" fill="#c0392b" />
         </svg>
       );
     }
-
     if (suit === 'copas') {
       return (
-        <svg viewBox="0 0 48 48" className={`${dim} flex-shrink-0 drop-shadow`} fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 12C12 12 16 10 24 10C32 10 36 12 36 12L34 23C34 29 29 33 24 33C19 33 14 29 14 23L12 12Z" fill="url(#copa_body)" stroke="#450a0a" strokeWidth="2" />
-          <path d="M16 14C16 14 19 12.5 24 12.5C29 12.5 32 14 32 14C32 18 30 24 24 24C18 24 16 18 16 14Z" fill="url(#copa_vin)" />
-          <rect x="22" y="32" width="4" height="7" fill="#b45309" stroke="#450a0a" strokeWidth="1.5" />
-          <ellipse cx="24" cy="35" rx="4" ry="2" fill="#facc15" stroke="#78350f" strokeWidth="1" />
-          <path d="M14 43C14 39 19 38 24 38C29 38 34 39 34 43H14Z" fill="url(#copa_foot)" stroke="#450a0a" strokeWidth="2" />
-          <defs>
-            <linearGradient id="copa_body" x1="12" y1="10" x2="36" y2="33" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#fde047" />
-              <stop offset="0.5" stopColor="#ca8a04" />
-              <stop offset="1" stopColor="#854d0e" />
-            </linearGradient>
-            <linearGradient id="copa_vin" x1="16" y1="12" x2="32" y2="24" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#f43f5e" />
-              <stop offset="0.6" stopColor="#991b1b" />
-              <stop offset="1" stopColor="#4c0519" />
-            </linearGradient>
-            <linearGradient id="copa_foot" x1="14" y1="38" x2="34" y2="43" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#fde047" />
-              <stop offset="1" stopColor="#a16207" />
-            </linearGradient>
-          </defs>
+        <svg viewBox="0 0 40 40" className={cls} aria-hidden="true">
+          <path d="M8.5 7 H31.5 L29 19 Q20 27.5 11 19 Z" fill="#c1121f" stroke="#4a0808" strokeWidth="1.8" strokeLinejoin="round" />
+          <rect x="7.5" y="4.5" width="25" height="3.6" rx="1.4" fill="#e8b02a" stroke="#4a0808" strokeWidth="1.3" />
+          <path d="M13 11 Q20 14 27 11" stroke="#f3c64b" strokeWidth="1.6" fill="none" />
+          <rect x="18" y="23" width="4" height="8" fill="#e8b02a" stroke="#4a0808" strokeWidth="1.2" />
+          <ellipse cx="20" cy="27" rx="4.2" ry="1.7" fill="#c1121f" stroke="#4a0808" strokeWidth="0.9" />
+          <path d="M10.5 36 Q11 31.5 20 31 Q29 31.5 29.5 36 Z" fill="#e8b02a" stroke="#4a0808" strokeWidth="1.4" strokeLinejoin="round" />
         </svg>
       );
     }
-
     if (suit === 'espadas') {
       return (
-        <svg viewBox="0 0 48 48" className={`${dim} flex-shrink-0 drop-shadow`} fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M23 4L24 2L25 4L26 31H22L23 4Z" fill="url(#esp_blade)" stroke="#1e293b" strokeWidth="1.5" />
-          <line x1="24" y1="5" x2="24" y2="28" stroke="#3b82f6" strokeWidth="1" />
-          <path d="M12 32C16 30 32 30 36 32C37 33 35 35 32 35C28 35 20 35 16 35C13 35 11 33 12 32Z" fill="#fbbf24" stroke="#78350f" strokeWidth="1.5" />
-          <circle cx="12" cy="33" r="2" fill="#d97706" />
-          <circle cx="36" cy="33" r="2" fill="#d97706" />
-          <rect x="22.5" y="35" width="3" height="7" rx="1" fill="#7f1d1d" stroke="#1e1e1e" strokeWidth="1" />
-          <line x1="22.5" y1="37" x2="25.5" y2="37" stroke="#fbbf24" strokeWidth="0.8" />
-          <line x1="22.5" y1="39" x2="25.5" y2="39" stroke="#fbbf24" strokeWidth="0.8" />
-          <circle cx="24" cy="44" r="3" fill="#f59e0b" stroke="#78350f" strokeWidth="1.5" />
-          <defs>
-            <linearGradient id="esp_blade" x1="22" y1="2" x2="26" y2="31" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#f8fafc" />
-              <stop offset="0.3" stopColor="#e2e8f0" />
-              <stop offset="0.7" stopColor="#94a3b8" />
-              <stop offset="1" stopColor="#475569" />
-            </linearGradient>
-          </defs>
+        <svg viewBox="0 0 40 40" className={cls} aria-hidden="true">
+          <path d="M20 1.5 L23.2 6 V27 H16.8 V6 Z" fill="#a9c8ee" stroke="#0f2c55" strokeWidth="1.5" strokeLinejoin="round" />
+          <line x1="20" y1="6" x2="20" y2="26" stroke="#2d5fa3" strokeWidth="1.2" />
+          <path d="M7 26.5 Q20 31 33 26.5 L33 29.6 Q20 34 7 29.6 Z" fill="#1d4f91" stroke="#0f2c55" strokeWidth="1.3" strokeLinejoin="round" />
+          <rect x="18.3" y="30.5" width="3.4" height="5.5" rx="1" fill="#8a5a1c" stroke="#3d240c" strokeWidth="1" />
+          <circle cx="20" cy="37.2" r="2.3" fill="#1d4f91" stroke="#0f2c55" strokeWidth="1" />
         </svg>
       );
     }
-
-    // Bastos
     return (
-      <svg viewBox="0 0 48 48" className={`${dim} flex-shrink-0 drop-shadow`} fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M21 44L20 22C19 16 18 10 20 6C21 3 27 3 28 6C30 10 29 16 28 22L27 44H21Z" fill="url(#bas_wood)" stroke="#1c1917" strokeWidth="2" />
-        <ellipse cx="23" cy="14" rx="2" ry="3" fill="#451a03" stroke="#292524" strokeWidth="1" />
-        <ellipse cx="26" cy="27" rx="2.5" ry="3.5" fill="#451a03" stroke="#292524" strokeWidth="1" />
-        <ellipse cx="22" cy="38" rx="2" ry="2.5" fill="#451a03" stroke="#292524" strokeWidth="1" />
-        <path d="M18 12C14 10 13 6 15 5C17 6 18 9 18 12Z" fill="#22c55e" stroke="#14532d" strokeWidth="1" />
-        <path d="M30 20C34 18 35 14 33 13C31 14 30 17 30 20Z" fill="#16a34a" stroke="#14532d" strokeWidth="1" />
-        <path d="M19 30C15 29 14 26 16 25C17 26 19 28 19 30Z" fill="#22c55e" stroke="#14532d" strokeWidth="1" />
-        <path d="M29 36C33 35 34 32 32 31C30 32 29 34 29 36Z" fill="#16a34a" stroke="#14532d" strokeWidth="1" />
-        <defs>
-          <linearGradient id="bas_wood" x1="18" y1="4" x2="30" y2="44" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#a16207" />
-            <stop offset="0.3" stopColor="#78350f" />
-            <stop offset="0.7" stopColor="#451a03" />
-            <stop offset="1" stopColor="#292524" />
-          </linearGradient>
-        </defs>
+      <svg viewBox="0 0 40 40" className={cls} aria-hidden="true">
+        <path d="M16.2 37.5 L14.2 11 Q13.5 2.5 20 2 Q26.5 2.5 25.8 11 L23.8 37.5 Q20 39.5 16.2 37.5 Z" fill="#a8692a" stroke="#3d240c" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M17 7 Q20 5 23 7" stroke="#d39a55" strokeWidth="1.3" fill="none" />
+        <ellipse cx="17.6" cy="15" rx="1.6" ry="1.1" fill="#5c3610" />
+        <ellipse cx="22.4" cy="21" rx="1.6" ry="1.1" fill="#5c3610" />
+        <ellipse cx="18" cy="28" rx="1.4" ry="1" fill="#5c3610" />
+        <path d="M14.5 13 Q8.5 11.5 8 6.5 Q13.5 7.5 14.7 12" fill="#2d7a3a" stroke="#164d21" strokeWidth="1" />
+        <path d="M25.3 24 Q31.5 23 32.5 18 Q27 18.5 25.2 23" fill="#2d7a3a" stroke="#164d21" strokeWidth="1" />
       </svg>
     );
   };
 
-  // Color schemes for suits
+  // Long sword / club, as drawn in the pips of the classic Spanish deck
+  const longGlyph = (cls: string) =>
+    suit === 'espadas' ? (
+      <svg viewBox="0 0 20 100" className={cls} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+        <path d="M10 1 L13 7 V72 H7 V7 Z" fill="#b9d3f2" stroke="#0f2c55" strokeWidth="1.4" strokeLinejoin="round" />
+        <line x1="10" y1="7" x2="10" y2="70" stroke="#2d5fa3" strokeWidth="1.1" />
+        <path d="M1 71 Q10 76 19 71 L19 75 Q10 80 1 75 Z" fill="#1d4f91" stroke="#0f2c55" strokeWidth="1.2" strokeLinejoin="round" />
+        <path d="M4.5 76 Q2 82 6 86" stroke="#1d4f91" strokeWidth="1.6" fill="none" />
+        <path d="M15.5 76 Q18 82 14 86" stroke="#1d4f91" strokeWidth="1.6" fill="none" />
+        <rect x="8" y="77" width="4" height="13" rx="1.2" fill="#8a5a1c" stroke="#3d240c" strokeWidth="0.9" />
+        <path d="M8 80 L12 82 M8 84 L12 86" stroke="#3d240c" strokeWidth="0.7" />
+        <circle cx="10" cy="94" r="3.6" fill="#e8b02a" stroke="#6b3d03" strokeWidth="1" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 20 100" className={cls} aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+        <path d="M7.4 98 L5 14 Q4.5 2 10 1.5 Q15.5 2 15 14 L12.6 98 Q10 100 7.4 98 Z" fill="#a8692a" stroke="#3d240c" strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M7.5 6 Q10 4 12.5 6" stroke="#d39a55" strokeWidth="1.1" fill="none" />
+        <ellipse cx="7.6" cy="24" rx="1.5" ry="1.1" fill="#5c3610" />
+        <ellipse cx="12.4" cy="40" rx="1.5" ry="1.1" fill="#5c3610" />
+        <ellipse cx="8" cy="58" rx="1.3" ry="1" fill="#5c3610" />
+        <ellipse cx="11.8" cy="76" rx="1.2" ry="0.9" fill="#5c3610" />
+        <path d="M5.2 21 Q0.5 18 0.8 11 Q5 14 5.4 19" fill="#2d7a3a" stroke="#164d21" strokeWidth="0.8" />
+        <path d="M14.8 47 Q19.5 44 19.2 37 Q15 40 14.6 45" fill="#2d7a3a" stroke="#164d21" strokeWidth="0.8" />
+      </svg>
+    );
+
+  // Small icon used in the corners and on the figures
+  const renderSuitIcon = (isLarge = false) =>
+    suitGlyph(isLarge ? (isHandSize ? 'w-10 h-10 sm:w-12 sm:h-12' : 'w-7 h-7') : isHandSize ? 'w-4 h-4' : 'w-3 h-3');
+
+  // Traditional Fournier index colours: each suit has its own colour, so the palo is read at a glance
   const suitTheme = {
-    oros: {
-      name: 'OROS',
-      badgeBg: 'bg-amber-100 text-amber-900 border-amber-500',
-      cornerNum: 'text-amber-950',
-      accentColor: 'border-amber-600',
-      bannerBg: 'bg-amber-500 text-stone-950',
-      suitColor: '#b45309',
-    },
-    copas: {
-      name: 'COPAS',
-      badgeBg: 'bg-rose-100 text-rose-900 border-rose-500',
-      cornerNum: 'text-rose-950',
-      accentColor: 'border-rose-600',
-      bannerBg: 'bg-red-600 text-white',
-      suitColor: '#be123c',
-    },
-    espadas: {
-      name: 'ESPADAS',
-      badgeBg: 'bg-blue-100 text-blue-900 border-blue-500',
-      cornerNum: 'text-slate-950',
-      accentColor: 'border-blue-700',
-      bannerBg: 'bg-blue-700 text-white',
-      suitColor: '#1d4ed8',
-    },
-    bastos: {
-      name: 'BASTOS',
-      badgeBg: 'bg-emerald-100 text-emerald-900 border-emerald-600',
-      cornerNum: 'text-emerald-950',
-      accentColor: 'border-emerald-700',
-      bannerBg: 'bg-emerald-700 text-white',
-      suitColor: '#15803d',
-    },
+    oros: { name: 'OROS', ink: '#a8650a' },
+    copas: { name: 'COPAS', ink: '#c1121f' },
+    espadas: { name: 'ESPADAS', ink: '#1d4f91' },
+    bastos: { name: 'BASTOS', ink: '#2d7a3a' },
   }[suit];
 
   // AUTHENTIC SPANISH FOURNIER COURT FIGURES (FIGURAS DE LA BARAJA ESPAÑOLA)
@@ -472,129 +417,106 @@ export const FournierCard: React.FC<FournierCardProps> = ({
     );
   };
 
-  // Court Figure Card Container
-  const renderCourtFigure = () => {
-    let figureTitle = 'SOTA';
-    let figureDesc = 'Infante 10';
+  const figureName = number === 10 ? 'SOTA' : number === 11 ? 'CABALLO' : 'REY';
 
-    if (number === 10) {
-      figureTitle = 'SOTA';
-      figureDesc = 'Infante';
-    } else if (number === 11) {
-      figureTitle = 'CABALLO';
-      figureDesc = 'Caballero';
-    } else if (number === 12) {
-      figureTitle = 'REY';
-      figureDesc = 'Monarca';
-    }
-
-    return (
-      <div className="flex-1 w-full flex flex-col items-center justify-between p-0.5 sm:p-1 overflow-hidden">
-        {/* Authentic Spanish Court Figure Artwork */}
-        <div className="w-full flex-1 flex flex-col items-center justify-center relative my-0.5">
-          {renderCourtFigureIllustration()}
-        </div>
-
-        {/* Figure Name Ribbon at bottom of frame */}
-        <div className="w-full text-center pb-0.5">
-          <span className="text-[7px] sm:text-[9px] font-mono font-black uppercase tracking-wider px-2 py-0.2 rounded-full bg-stone-900 text-amber-300 border border-stone-700 shadow-xs inline-block">
-            {figureTitle} ({number})
-          </span>
-        </div>
-      </div>
-    );
+  // Pip positions (percent of the centre area), traditional layouts
+  const PIP_LAYOUTS: Record<number, { pos: [number, number][]; size: number }> = {
+    1: { pos: [[50, 50]], size: 78 },
+    2: { pos: [[50, 22], [50, 78]], size: 46 },
+    3: { pos: [[50, 16], [50, 50], [50, 84]], size: 38 },
+    4: { pos: [[27, 23], [73, 23], [27, 77], [73, 77]], size: 40 },
+    5: { pos: [[27, 20], [73, 20], [50, 50], [27, 80], [73, 80]], size: 36 },
+    6: { pos: [[27, 16], [73, 16], [27, 50], [73, 50], [27, 84], [73, 84]], size: 34 },
+    7: { pos: [[27, 15], [73, 15], [50, 33], [27, 52], [73, 52], [27, 85], [73, 85]], size: 32 },
   };
 
-  // Layout for numbered cards (1..7)
-  const renderPipsLayout = () => {
-    if (number >= 10) return renderCourtFigure();
+  // Per-size typography for the corner indices
+  const indexText = {
+    sm: 'text-[15px]',
+    md: 'text-2xl',
+    lg: 'text-[28px]',
+    hand: 'text-[26px] sm:text-[30px] md:text-[36px]',
+  }[size];
+  const cornerIcon = { sm: 'w-[9px] h-[9px]', md: 'w-3.5 h-3.5', lg: 'w-4 h-4', hand: 'w-4 h-4 sm:w-5 sm:h-5' }[size];
 
-    if (number === 1) {
+  const corner = (rotated: boolean) => (
+    <div
+      className={`absolute z-10 flex flex-col items-center leading-none ${
+        rotated ? 'bottom-[5%] right-[6%] rotate-180' : 'top-[5%] left-[6%]'
+      }`}
+    >
+      <span
+        className={`font-serif font-black tracking-tighter ${indexText}`}
+        style={{ color: suitTheme.ink, fontVariantNumeric: 'lining-nums', textShadow: '0 1px 0 rgba(255,255,255,0.8)' }}
+      >
+        {number}
+      </span>
+      {suitGlyph(`${cornerIcon} mt-[1px]`)}
+    </div>
+  );
+
+  const centre = () => {
+    if (number >= 10) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center py-1">
-          <div className="scale-125 sm:scale-150 transform hover:scale-160 transition-transform">
-            {renderSuitIcon(true)}
+        <div className="absolute inset-x-[16%] top-[8%] bottom-[8%] flex flex-col items-center justify-center">
+          <div className="w-full flex-1 min-h-0 flex items-center justify-center">{renderCourtFigureIllustration()}</div>
+          {size !== 'sm' && (
+            <span
+              className="mt-0.5 text-[8px] sm:text-[10px] font-serif font-black tracking-[0.18em]"
+              style={{ color: suitTheme.ink }}
+            >
+              {figureName}
+            </span>
+          )}
+        </div>
+      );
+    }
+    // Espadas and bastos are drawn like the classic deck: long and crossed diagonally
+    if ((suit === 'espadas' || suit === 'bastos') && number <= 7) {
+      // Pairs crossed in X, side by side, so each one can still be counted
+      const tilt = number <= 3 ? 27 : 17;
+      const xs = number <= 3 ? [50] : number <= 5 ? [27, 73] : [16, 50, 84];
+      const crossed: { x: number; rot: number }[] =
+        number === 1 ? [{ x: 50, rot: 0 }] : xs.flatMap((x) => [{ x, rot: tilt }, { x, rot: -tilt }]);
+      // Odd numbers add one upright in the middle
+      if (number % 2 === 1 && number > 1) crossed.push({ x: 50, rot: 0 });
+      const length = number === 1 ? 92 : number <= 3 ? 88 : 84;
+      return (
+        <div className="absolute inset-x-[18%] top-[7%] bottom-[7%]">
+          {crossed.map(({ x, rot }, i) => (
+            <div
+              key={i}
+              className="absolute"
+              style={{
+                left: `${x}%`,
+                top: '50%',
+                height: `${length}%`,
+                aspectRatio: number === 1 ? '1 / 3.6' : number <= 3 ? '1 / 5' : '1 / 6',
+                transform: `translate(-50%, -50%) rotate(${rot}deg)`,
+              }}
+            >
+              {longGlyph('w-full h-full drop-shadow-[0_1px_0_rgba(0,0,0,0.3)]')}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    const layout = PIP_LAYOUTS[number];
+    if (!layout) return null;
+    return (
+      <div className="absolute inset-x-[20%] top-[9%] bottom-[9%]">
+        {layout.pos.map(([x, y], i) => (
+          <div
+            key={i}
+            className="absolute -translate-x-1/2 -translate-y-1/2"
+            style={{ left: `${x}%`, top: `${y}%`, width: `${layout.size}%`, aspectRatio: '1 / 1' }}
+          >
+            {suitGlyph('w-full h-full drop-shadow-[0_1px_0_rgba(0,0,0,0.25)]')}
           </div>
-          <div className="mt-1 px-2 py-0.5 rounded-full bg-stone-900 text-amber-300 font-serif font-black text-[8px] sm:text-[10px] tracking-widest shadow border border-amber-600/40">
-            AS DE {suitTheme.name}
-          </div>
-        </div>
-      );
-    }
-
-    if (number === 2) {
-      return (
-        <div className="flex-1 flex flex-col justify-around items-center py-1">
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-        </div>
-      );
-    }
-
-    if (number === 3) {
-      return (
-        <div className="flex-1 flex flex-col justify-around items-center py-1">
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-        </div>
-      );
-    }
-
-    if (number === 4) {
-      return (
-        <div className="flex-1 grid grid-cols-2 gap-1.5 place-items-center p-1.5">
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-        </div>
-      );
-    }
-
-    if (number === 5) {
-      return (
-        <div className="flex-1 grid grid-cols-2 gap-1 place-items-center p-1 relative">
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            {renderSuitIcon(false)}
-          </div>
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-        </div>
-      );
-    }
-
-    if (number === 6) {
-      return (
-        <div className="flex-1 grid grid-cols-2 gap-1.5 place-items-center py-1">
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-        </div>
-      );
-    }
-
-    if (number === 7) {
-      return (
-        <div className="flex-1 grid grid-cols-2 gap-1 place-items-center py-0.5 relative">
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-          <div className="col-span-2 flex justify-center -my-1">
-            {renderSuitIcon(false)}
-          </div>
-          {renderSuitIcon(false)}
-          {renderSuitIcon(false)}
-        </div>
-      );
-    }
-
-    return null;
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -602,69 +524,42 @@ export const FournierCard: React.FC<FournierCardProps> = ({
       onClick={selectable ? onClick : undefined}
       className={`
         ${sizeClasses}
-        relative rounded-xl border-[2.5px] border-stone-900 bg-[#fffef9] p-1 sm:p-1.5 shadow-lg
-        flex flex-col justify-between select-none overflow-hidden transition-all duration-200
+        relative rounded-[9%/6%] border border-stone-900 bg-[#fbf6e9] shadow-lg
+        select-none overflow-hidden transition-all duration-200
         ${selectable ? 'cursor-pointer hover:-translate-y-2 hover:shadow-2xl' : 'cursor-default'}
-        ${selected ? '-translate-y-5 ring-4 ring-amber-400 border-amber-600 shadow-2xl scale-105' : ''}
+        ${selected ? '-translate-y-5 ring-4 ring-amber-400 shadow-2xl scale-105' : ''}
         ${className}
       `}
+      title={`${number === 1 ? 'As' : number >= 10 ? figureName.charAt(0) + figureName.slice(1).toLowerCase() : number} de ${suitTheme.name.toLowerCase()}`}
     >
-      {/* Traditional inner black frame with Pintas */}
-      <div className="absolute inset-1 border border-stone-800 rounded pointer-events-none">
+      {/* Paper texture */}
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_30%_20%,rgba(255,255,255,0.7),transparent_60%)]" />
+
+      {/* Traditional frame with the "pintas" (gaps that tell the suit: none oros, 1 copas, 2 espadas, 3 bastos) */}
+      <div className="absolute inset-[4%] border-[1.5px] rounded-[6%/4%] pointer-events-none" style={{ borderColor: '#2b2118' }}>
         {renderPintas()}
       </div>
 
-      {/* Top Left Corner: Large Number & Suit Pip with label */}
-      <div className="relative z-10 flex items-center justify-between leading-none px-0.5">
-        <div className="flex items-center gap-1">
-          <span className={`font-serif font-black text-sm sm:text-base md:text-lg ${suitTheme.cornerNum} drop-shadow-xs`}>
-            {number}
-          </span>
-          <div className="scale-85 sm:scale-100">{renderSuitIcon(false)}</div>
-        </div>
+      {corner(false)}
+      {centre()}
+      {corner(true)}
 
-        {/* Suit name tag in corner so palos are immediately unmistakable */}
-        <span className={`text-[7px] sm:text-[8px] font-mono font-black uppercase px-1 py-0.2 rounded border ${suitTheme.badgeBg}`}>
-          {suitTheme.name}
-        </span>
-      </div>
-
-      {/* Center Card Body */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center my-0.5 overflow-hidden">
-        {renderPipsLayout()}
-      </div>
-
-      {/* Bottom Right Corner: Inverted Number & Suit Pip */}
-      <div className="relative z-10 flex items-center justify-between leading-none rotate-180 px-0.5">
-        <div className="flex items-center gap-1">
-          <span className={`font-serif font-black text-sm sm:text-base md:text-lg ${suitTheme.cornerNum}`}>
-            {number}
-          </span>
-          <div className="scale-85 sm:scale-100">{renderSuitIcon(false)}</div>
-        </div>
-        <span className={`text-[7px] sm:text-[8px] font-mono font-black uppercase px-1 py-0.2 rounded border ${suitTheme.badgeBg}`}>
-          {suitTheme.name}
-        </span>
-      </div>
-
-      {/* Mus 8-Reyes Indicator (3=Rey, 2=As, 1=As, 12=Rey) */}
-      {(number === 3 || number === 2 || number === 1 || number === 12) && (
+      {/* Mus 8 reyes: the 3 counts as a king and the 2 as an ace */}
+      {(number === 3 || number === 2) && (
         <div
-          className={`absolute top-1 right-1 text-[7px] sm:text-[8px] font-mono font-black px-1.5 py-0.2 rounded shadow border z-20 ${
-            number === 3 || number === 12
-              ? 'bg-amber-400 text-stone-950 border-amber-700'
-              : 'bg-emerald-600 text-white border-emerald-800'
-          }`}
-          title={number === 3 || number === 12 ? 'Cuenta como REY (10 puntos en juego)' : 'Cuenta como AS (1 punto en juego)'}
+          className={`absolute top-[5%] right-[6%] z-20 rounded-full font-mono font-black leading-none shadow-sm ${
+            size === 'sm' ? 'text-[6px] px-0.5 py-[1px]' : 'text-[8px] sm:text-[9px] px-1 py-0.5'
+          } ${number === 3 ? 'bg-amber-400 text-stone-950' : 'bg-emerald-600 text-white'}`}
+          title={number === 3 ? 'En el mus el 3 vale como un REY' : 'En el mus el 2 vale como un AS'}
         >
-          {number === 3 ? '★ REY' : number === 2 ? '★ AS' : number === 1 ? 'AS' : 'REY'}
+          {number === 3 ? '=REY' : '=AS'}
         </div>
       )}
 
       {/* Discard selection overlay */}
       {selected && (
-        <div className="absolute inset-0 bg-amber-500/20 rounded-xl flex items-center justify-center z-30 pointer-events-none">
-          <span className="bg-red-600 text-white text-[9px] sm:text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded shadow-lg border border-red-800 animate-pulse">
+        <div className="absolute inset-0 bg-amber-500/20 flex items-end justify-center pb-[8%] z-30 pointer-events-none">
+          <span className="bg-red-600 text-white text-[9px] sm:text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded shadow-lg border border-red-800">
             Descartar
           </span>
         </div>
