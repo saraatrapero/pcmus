@@ -13,6 +13,10 @@ interface RetroDosOverlayProps {
   gameMode: string;
   gameSpeed?: 'tranquilo' | 'normal' | 'rapido';
   onChangeGameSpeed?: () => void;
+  userName?: string;
+  isAdmin?: boolean;
+  onOpenAdmin?: () => void;
+  onLogout?: () => void;
 }
 
 export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
@@ -26,6 +30,10 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
   gameMode,
   gameSpeed = 'tranquilo',
   onChangeGameSpeed,
+  userName,
+  isAdmin = false,
+  onOpenAdmin,
+  onLogout,
 }) => {
   const [soundMuted, setSoundMuted] = React.useState(!sound.enabled);
   const [voiceEnabled, setVoiceEnabled] = React.useState(voiceEngine.enabled);
@@ -81,7 +89,7 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
               title="Control de usuarios y aprendizaje adaptativo de la IA"
             >
               <span>🧠</span>
-              <span className="hidden sm:inline">IA & Usuarios</span>
+              <span className="hidden sm:inline">Tu perfil IA</span>
             </button>
           )}
 
@@ -166,6 +174,31 @@ export const RetroDosOverlay: React.FC<RetroDosOverlayProps> = ({
             <span>📜</span>
             <span className="hidden sm:inline">Reglas</span>
           </button>
+
+          {/* Administrator: manage users */}
+          {isAdmin && onOpenAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="px-2.5 py-1 rounded-lg bg-amber-900/70 hover:bg-amber-800 border border-amber-500/70 text-xs font-bold text-amber-200 transition flex items-center gap-1"
+              title="Crear, editar y borrar usuarios"
+            >
+              <span>👥</span>
+              <span className="hidden sm:inline">Usuarios</span>
+            </button>
+          )}
+
+          {/* Logged-in user & logout */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 border border-stone-700 text-xs font-bold text-stone-200 transition flex items-center gap-1 max-w-[160px]"
+              title="Cerrar sesión"
+            >
+              <span>👤</span>
+              <span className="truncate hidden sm:inline">{userName}</span>
+              <span className="text-stone-400">· Salir</span>
+            </button>
+          )}
 
           {/* Exit / Menu */}
           <button

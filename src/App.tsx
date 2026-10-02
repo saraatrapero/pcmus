@@ -41,6 +41,10 @@ import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { InteractiveTutorial } from './components/InteractiveTutorial';
 import { MultiplayerChatModal } from './components/MultiplayerChatModal';
 import { UserControlModal } from './components/UserControlModal';
+import { LoginScreen } from './components/LoginScreen';
+import { AdminUsersModal } from './components/AdminUsersModal';
+import { authService, AuthUser } from './auth/authService';
+import type { Difficulty } from './aiPlayer';
 import { userProfileEngine, UserProfile } from './userProfileEngine';
 import { multiplayerService } from './multiplayer/multiplayerService';
 import { TableSnapshot, toAbsolute, toLocal, absoluteSeat, localSeat as toLocalSeat } from './multiplayer/netSync';
@@ -95,6 +99,55 @@ export default function App() {
   const [señasOpen, setSeñasOpen] = useState<boolean>(false);
   const [userControlOpen, setUserControlOpen] = useState<boolean>(false);
   const [activeUser, setActiveUser] = useState<UserProfile>(userProfileEngine.getActiveUser());
+  // Access control: undefined = checking the session, null = must log in
+  const [authUser, setAuthUser] = useState<AuthUser | null | undefined>(undefined);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [adminOpen, setAdminOpen] = useState<boolean>(false);
+  // Game level of the rivals (saved in the account)
+  const [difficulty, setDifficulty] = useState<Difficulty>('medio');
+  const difficultyRef = useRef<Difficulty>('medio');
+  difficultyRef.current = difficulty;
+  const aiLevel = (p: Player | undefined): Difficulty => (p && p.team === 1 ? difficultyRef.current : 'medio');
+
+  const enterAs = async (user: AuthUser) => {
+    multiplayerService.setPlayerId(user.id);
+    let profile: unknown = null;
+    try {
+      profile = (await authService.loadProfile()).profile;
+    } catch {
+      /* start learning from scratch */
+    }
+    userProfileEngine.attachServerUser(user, profile);
+    setDifficulty(user.difficulty || 'medio');
+    setAuthNotice(null);
+    setAuthUser(user);
+  };
+
+  // Check the saved session when the page opens
+  useEffect(() => {
+    authService
+      .me()
+      .then((user) => (user ? enterAs(user) : setAuthUser(null)))
+      .catch((err) => {
+        setAuthNotice((err as Error).message);
+        setAuthUser(null);
+      });
+    return authService.onSessionLost(() => {
+      userProfileEngine.detachServerUser();
+      setAuthNotice('Tu sesión ha terminado. Vuelve a entrar.');
+      setAuthUser(null);
+      setView('select');
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const changeDifficulty = (d: Difficulty) => {
+    setDifficulty(d);
+    authService
+      .savePreferences({ difficulty: d })
+      .then((u) => setAuthUser((prev) => (prev ? { ...prev, difficulty: u.difficulty } : prev)))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     const unsub = userProfileEngine.subscribe(() => {
@@ -591,7 +644,7 @@ export default function App() {
   }, [multiplayerRoom?.id, view, netRole]);
 
   // ───────── Save & resume (AI Studio reloads the preview page often) ─────────
-  const SAVE_KEY = 'pc_mus_saved_game_v1';
+  const SAVE_KEY = `pc_mus_saved_game_v1_${authUser?.id || 'anon'}`;
   const clearSavedGame = () => {
     try {
       localStorage.removeItem(SAVE_KEY);
@@ -601,7 +654,7 @@ export default function App() {
   };
   // Save the game against the computer whenever the table is in a stable state
   useEffect(() => {
-    if (netRole !== 'none' || players.length !== 4) return;
+    if (!authUser || netRole !== 'none' || players.length !== 4) return;
     if (view !== 'game' && view !== 'bracket') return;
     if (view === 'game' && (phase === 'game_over' || handWonRef.current)) {
       if (gameMode !== 'torneo' || phase === 'game_over') clearSavedGame();
@@ -632,8 +685,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [netRole, view, players, phase, currentTurn, manoIndex, lanceBets, scoreTeam0, scoreTeam1, isTransitioning, tournamentRound]);
 
-  // After a page reload, go back to where you were: the online table or the saved game
+  // After a page reload (once logged in), go back to where you were: the online table or the saved game
   useEffect(() => {
+    if (!authUser) return;
     const roomId = multiplayerService.getActiveRoomId();
     if (!roomId) {
       try {
@@ -671,7 +725,7 @@ export default function App() {
       })
       .catch(() => multiplayerService.setActiveRoomId(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authUser?.id]);
 
   const applySnapshotRef = useRef(applySnapshot);
   applySnapshotRef.current = applySnapshot;
@@ -967,7 +1021,8 @@ export default function App() {
         if (gazesRef.current[partnerOf(seat)] !== seat) continue;
         const watched = opponentsOf(seat).some((o) => gazesRef.current[o] === seat);
         // Careful players wait until nobody watches; careless ones sometimes get caught
-        const chance = watched ? 0.03 + p.bluffRate * 0.05 : 0.35;
+        const care = p.team === 1 ? { facil: 3, medio: 1, dificil: 0.25 }[difficultyRef.current] : 1;
+        const chance = watched ? (0.03 + p.bluffRate * 0.05) * care : 0.35;
         if (Math.random() < chance) {
           performAISeña(seat, pending[0]);
           break; // one seña per tick keeps it readable
@@ -1010,7 +1065,7 @@ export default function App() {
 
     // Mus question phase
     if (phase === 'mus_dialog') {
-      const { wantsMus, speech } = decideMusOrNoMus(aiPlayer);
+      const { wantsMus, speech } = decideMusOrNoMus(aiPlayer, aiLevel(aiPlayer));
 
       // Update player speech
       setPlayers((prev) =>
@@ -1077,7 +1132,8 @@ export default function App() {
       {
         partnerSeñas: teamIntel[partnerOf(currentTurn)] || [],
         rivalSeñas: opponentsOf(currentTurn).flatMap((o) => teamIntel[o] || []),
-      }
+      },
+      aiLevel(aiPlayer)
     );
 
     // Apply speech
@@ -1616,6 +1672,7 @@ export default function App() {
       if (gameMode !== 'torneo') setPhase('game_over');
       return;
     }
+    if (netRole !== 'client') userProfileEngine.recordHandFinished(recountPlan?.totalTeam0 || 0);
     setRecountPlan(null);
     setPhase('round_end');
     setRecentEvent('Mano finalizada. Preparaos para la siguiente mano.');
@@ -1634,6 +1691,7 @@ export default function App() {
   // Trigger win of game / match / tournament
   const triggerWin = (reason: string) => {
     handWonRef.current = true;
+    userProfileEngine.recordMatchFinished(true);
     sound.playVictory();
     triggerCameo('win');
     const winQuote = getCharacterLine(players[0]?.id || 'tio_gil', 'win');
@@ -1662,6 +1720,7 @@ export default function App() {
   // Trigger loss
   const triggerDefeat = (reason: string) => {
     handWonRef.current = true;
+    userProfileEngine.recordMatchFinished(false);
     const loseQuote = getCharacterLine(players[0]?.id || 'tio_gil', 'lose');
     if (players[0] && loseQuote) {
       voiceEngine.speakCharacter(players[0].id, loseQuote);
@@ -1927,6 +1986,30 @@ export default function App() {
     );
   };
 
+  const logout = async () => {
+    if (gameMode === 'multijugador') leaveOnlineTable();
+    clearAllPendingTimers();
+    handWonRef.current = true;
+    setRecountPlan(null);
+    setCameo(null);
+    setView('select');
+    await authService.logout();
+    userProfileEngine.detachServerUser();
+    setAuthUser(null);
+  };
+
+  // Access control: nothing of the game is shown before logging in
+  if (authUser === undefined) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-brass-300 font-serif text-lg animate-pulse">
+        Abriendo la taberna...
+      </div>
+    );
+  }
+  if (authUser === null) {
+    return <LoginScreen onLoggedIn={enterAs} initialError={authNotice} />;
+  }
+
   return (
     <div className="min-h-screen text-stone-100 flex flex-col justify-between">
       {/* Retro CRT overlay & Top bar */}
@@ -1947,6 +2030,10 @@ export default function App() {
         onOpenTutorial={() => setView('tutorial')}
         onOpenUserControl={() => setUserControlOpen(true)}
         gameMode={gameMode}
+        userName={authUser?.displayName}
+        isAdmin={authUser?.role === 'admin'}
+        onOpenAdmin={() => setAdminOpen(true)}
+        onLogout={logout}
         gameSpeed={gameSpeed}
         onChangeGameSpeed={() =>
           setGameSpeed((prev) =>
@@ -1965,6 +2052,8 @@ export default function App() {
           onOpenMultiplayer={() => setView('multiplayer')}
           onOpenTutorial={() => setView('tutorial')}
           onOpenUserControl={() => setUserControlOpen(true)}
+          difficulty={difficulty}
+          onChangeDifficulty={changeDifficulty}
         />
       )}
 
@@ -1973,6 +2062,8 @@ export default function App() {
         <MultiplayerLobby
           onBackToMenu={() => setView('select')}
           onStartGame={handleStartMultiplayerGame}
+          defaultPlayerName={authUser?.displayName}
+          defaultCharacterId={authUser?.avatarId}
         />
       )}
 
@@ -2221,6 +2312,19 @@ export default function App() {
 
       {/* Rules & History Modal */}
       <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
+
+      {/* Administrator: user management */}
+      {authUser.role === 'admin' && (
+        <AdminUsersModal
+          isOpen={adminOpen}
+          onClose={() => setAdminOpen(false)}
+          currentUser={authUser}
+          onCurrentUserChanged={(u) => {
+            setAuthUser(u);
+            setDifficulty(u.difficulty);
+          }}
+        />
+      )}
 
       {/* User Control & AI Tactical Learning Modal */}
       <UserControlModal
