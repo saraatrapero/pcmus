@@ -231,8 +231,8 @@ export const SeatedPlayer: React.FC<SeatedPlayerProps> = ({
         </>
       ) : (
         <>
-          {figure}
           {nameplate}
+          {figure}
         </>
       )}
     </div>
