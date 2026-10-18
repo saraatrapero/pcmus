@@ -1,0 +1,6 @@
+# Bots enviados por otros equipos mediante pull request.
+# Añade tu bot en esta carpeta y una entrada aquí. Ejemplo:
+#
+# [[player]]
+# file = "mi_equipo_bot.py"
+# class = "MiBot"

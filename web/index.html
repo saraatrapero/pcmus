@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>PC Mus · Mus a dos en la taberna</title>
+  <meta name="description" content="Juega al mus a dos contra bots de IA en el navegador." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🂡</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya:wght@500;700;800&family=Alegreya+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="#" data-view="start">PC Mus</a>
+    <nav>
+      <a href="#" data-view="start">Jugar</a>
+      <a href="#" data-view="board">Clasificación</a>
+      <a href="https://pcmus.readthedocs.io" target="_blank" rel="noopener">Documentación</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Carga de Pyodide -->
+    <section id="loading" class="view is-active" aria-live="polite">
+      <p class="loading-title">Abriendo la taberna…</p>
+      <p id="loading-step" class="muted">Cargando Python en el navegador</p>
+    </section>
+
+    <!-- Inicio: elegir rival -->
+    <section id="start" class="view">
+      <h1>Mus a dos</h1>
+      <p class="lead">Una partida contra un bot, con baraja española y a 8 reyes. Gana quien llegue antes a la meta.</p>
+      <h2>Elige rival</h2>
+      <div id="bot-list" class="bot-list" role="radiogroup" aria-label="Rival"></div>
+      <div class="start-row">
+        <label>Meta
+          <select id="target">
+            <option value="30">30 piedras</option>
+            <option value="40">40 piedras</option>
+          </select>
+        </label>
+        <button id="start-btn" class="btn btn-primary" type="button">Sentarse a la mesa</button>
+      </div>
+      <details class="rules">
+        <summary>Reglas en dos minutos</summary>
+        <p>Cada uno recibe cuatro cartas. Los treses valen como reyes y los doses como ases. Si los dos pedís mus, os descartáis y se reparte otra vez; si alguien dice «no hay mus», se juegan cuatro lances: <strong>grande</strong> (cartas altas), <strong>chica</strong> (bajas), <strong>pares</strong> y <strong>juego</strong> (31 o más; si nadie llega, se juega al punto).</p>
+        <p>En cada lance puedes pasar, envidar, subir, querer, no querer o echar un órdago. Si no te quieren, te llevas lo que ya estaba aceptado (1 piedra si era el primer envite). Lo querido se cuenta al final de la mano. Un órdago querido decide la partida en ese mismo lance. Los empates son para la mano.</p>
+      </details>
+    </section>
+
+    <!-- Mesa -->
+    <section id="game" class="view">
+      <div class="score" aria-label="Marcador">
+        <div class="score-side you"><span>Tú</span><strong id="score-you">0</strong></div>
+        <div class="score-mid"><span id="target-label">a 30</span><span id="hand-label">Mano 1</span></div>
+        <div class="score-side rival"><span id="rival-name">Bot</span><strong id="score-bot">0</strong></div>
+      </div>
+
+      <div class="table">
+        <div class="seat rival-seat">
+          <div id="rival-cards" class="cards small"></div>
+          <p id="rival-says" class="says" aria-live="polite"></p>
+        </div>
+
+        <div class="felt">
+          <ol id="lances" class="lances" aria-label="Lances"></ol>
+          <p id="bet-status" class="bet-status"></p>
+          <p id="mano-badge" class="mano-badge"></p>
+        </div>
+
+        <div class="seat you-seat">
+          <p id="you-say" class="says you" aria-live="polite"></p>
+          <div id="my-cards" class="cards"></div>
+          <p id="hint" class="hint"></p>
+        </div>
+      </div>
+
+      <div id="actions" class="actions" aria-label="Tus jugadas"></div>
+      <p id="error" class="error" role="alert"></p>
+    </section>
+
+    <!-- Clasificación -->
+    <section id="board" class="view">
+      <h1>Clasificación</h1>
+      <p id="board-meta" class="muted"></p>
+      <div class="table-wrap">
+        <table class="leaderboard">
+          <thead><tr><th>#</th><th>Bot</th><th>Partidas</th><th>Victorias</th><th>%</th><th>Elo</th><th>Fallos</th></tr></thead>
+          <tbody id="board-body"><tr><td colspan="7">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="muted">El torneo se juega solo en GitHub Actions cada vez que cambia un bot, y todos los lunes.</p>
+    </section>
+  </main>
+
+  <!-- Recuento -->
+  <dialog id="summary">
+    <h2 id="summary-title">Recuento</h2>
+    <div class="reveal">
+      <div><p class="who">Tú</p><div id="sum-you" class="cards small"></div><p id="sum-you-desc" class="muted"></p></div>
+      <div><p class="who" id="sum-rival-name">Bot</p><div id="sum-bot" class="cards small"></div><p id="sum-bot-desc" class="muted"></p></div>
+    </div>
+    <ul id="sum-lines" class="sum-lines"></ul>
+    <div class="dialog-actions">
+      <button id="sum-next" class="btn btn-primary" type="button">Siguiente mano</button>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+site_name: PC Mus
+site_description: Mus a dos con bots de IA, API para crear jugadores y torneo automático.
+repo_url: https://github.com/saraatrapero/pcmus
+edit_uri: edit/main/docs/
+docs_dir: docs
+theme:
+  name: material
+  language: es
+  palette:
+    - scheme: slate
+      primary: brown
+      accent: amber
+  features:
+    - navigation.sections
+    - content.code.copy
+nav:
+  - Inicio: index.md
+  - Reglamento: reglas.md
+  - Jugar: jugar.md
+  - Crear un bot (tutorial): crear-un-bot.md
+  - Referencia del API: api.md
+  - Torneo y clasificación: torneo.md
+  - Bots de referencia: bots.md
+  - Contribuir: contribuir.md
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+plugins:
+  - search:
+      lang: es
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: false
+            members_order: source
+            heading_level: 3

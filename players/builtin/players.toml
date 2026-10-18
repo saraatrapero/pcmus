@@ -1,0 +1,14 @@
+# Bots de referencia que vienen con el proyecto (mantenidos por el equipo).
+# Los bots que lleguen por pull request van en ../community/players.toml.
+
+[[player]]
+file = "aleatorio.py"
+class = "Aleatorio"
+
+[[player]]
+file = "tio_paco.py"
+class = "TioPaco"
+
+[[player]]
+file = "abuela_remedios.py"
+class = "AbuelaRemedios"

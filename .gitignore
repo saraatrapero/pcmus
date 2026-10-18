@@ -8,3 +8,15 @@ coverage/
 !.env.example
 server.js
 data/
+
+# Python (motor de mus, bots y torneo)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+_site/
+site/
