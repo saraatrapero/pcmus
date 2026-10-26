@@ -1,4 +1,4 @@
-_Actualizado: 2026-10-19T12:28:42+00:00 · 20 partidas por pareja a 30 piedras_
+_Actualizado: 2026-10-26T12:27:17+00:00 · 20 partidas por pareja a 30 piedras_
 
 | # | Bot | Autores | Partidas | Victorias | % | Elo | Fallos |
 |---|-----|---------|---------:|----------:|--:|----:|-------:|

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-19T12:28:42+00:00",
+  "generated_at": "2026-10-26T12:27:17+00:00",
   "config": {
     "games_per_pair": 20,
     "target": 30,
@@ -24,7 +24,7 @@
       "points_against": 635,
       "elo": 1607.5,
       "win_rate": 0.7,
-      "avg_think_time": 0.9217
+      "avg_think_time": 0.9201
     },
     {
       "name": "tio-paco",
